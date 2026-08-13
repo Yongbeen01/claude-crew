@@ -6,7 +6,7 @@ import { bus, logActivity } from './bus.js';
 import { Runner } from './runner.js';
 import { loadPersona } from './personas.js';
 import { paths, readJson, writeJson } from './store.js';
-import { issueToken, revokeTokensFor, mcpConfigFor, officeToolNames, bindHooks } from './mcpServer.js';
+import { issueToken, revokeTokensFor, mcpConfigFor, officeToolNames, tokenFor, bindHooks } from './mcpServer.js';
 import { briefing } from './jobs.js';
 import * as approvals from './approvals.js';
 import { forgetSummary } from './summarize.js';
@@ -215,7 +215,11 @@ export function hire(personaKey, opts = {}) {
     persona,
     appendSystemPrompt: [brief, opts.appendSystemPrompt].filter(Boolean).join('\n\n'),
     pluginDirs: [persona.dir],
-    mcpServers: { ...mcpConfigFor(token), ...(opts.mcpServers ?? {}) },
+    mcpServers: {
+      ...mcpConfigFor(token),
+      ...(person.watch ? browserMcp(person) : {}),
+      ...(opts.mcpServers ?? {}),
+    },
     alwaysAllowTools: officeToolNames(),
     settingsJson: sessionSettings(token),
   });
@@ -330,10 +334,42 @@ export function touch(id) {
   return true;
 }
 
-export function setWatch(id, on) {
+/**
+ * "작업 과정 지켜보기" — attach a *visible* browser to this person.
+ *
+ * @playwright/mcp runs headed by default (`--headless` is the opt-out), so
+ * simply attaching the server is what makes the work visible. The tool set of a
+ * running session can't be changed, so the process is swapped for one resuming
+ * the same conversation — the person keeps everything said so far.
+ */
+function browserMcp(person) {
+  return {
+    playwright: {
+      command: 'npx',
+      args: [
+        '-y', '@playwright/mcp@latest',
+        // A profile per person, or two people browsing at once fight over one.
+        '--user-data-dir', path.join(SESSIONS_DIR, person.id, 'browser').replace(/\\/g, '/'),
+        '--output-dir', path.join(SESSIONS_DIR, person.id).replace(/\\/g, '/'),
+      ],
+    },
+  };
+}
+
+export async function setWatch(id, on) {
   const person = people.get(id);
-  if (!person) return false;
+  if (!person?.runner) return false;
+  if (person.watch === !!on) return true;
   person.watch = !!on;
+
+  const token = tokenFor(person.id);
+  const servers = { ...mcpConfigFor(token), ...(person.watch ? browserMcp(person) : {}) };
+  logActivity('watch', person.watch
+    ? `${person.name} — 브라우저를 띄워 보여줍니다`
+    : `${person.name} — 브라우저를 내립니다`, id);
+
+  announce();
+  await person.runner.restart({ mcpServers: servers });
   announce();
   return true;
 }

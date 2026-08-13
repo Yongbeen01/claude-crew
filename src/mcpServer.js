@@ -40,6 +40,12 @@ export function personIdForToken(token) {
   return tokens.get(token) ?? null;
 }
 
+/** A person's existing token, so a restart keeps the same MCP + hook URLs. */
+export function tokenFor(personId) {
+  for (const [token, id] of tokens) if (id === personId) return token;
+  return null;
+}
+
 /** What goes into a session's --mcp-config. */
 export function mcpConfigFor(token) {
   return { office: { type: 'http', url: `${baseUrl}/mcp/${token}` } };

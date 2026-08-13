@@ -246,7 +246,9 @@ export function createServer() {
       }
       if (sub === 'watch' && req.method === 'POST') {
         const body = await readBody(req);
-        return json(res, 200, { ok: crew.setWatch(id, body.on === true) });
+        // Restarts the session onto the same conversation, so this can take a
+        // couple of seconds.
+        return json(res, 200, { ok: await crew.setWatch(id, body.on === true) });
       }
       // Dropping a job card on someone: they get the accumulated briefing.
       if (sub === 'job' && req.method === 'POST') {

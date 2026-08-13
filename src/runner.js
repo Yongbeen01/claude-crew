@@ -37,6 +37,16 @@ function q(a) {
   return /[\s"^&|<>()]/.test(s) ? `"${s.replace(/"/g, '\\"')}"` : s;
 }
 
+/** `claude` spawns children of its own, so kill the tree, not just the parent. */
+function killTree(child) {
+  if (!child || child.exitCode !== null) return;
+  if (isWin && child.pid) {
+    spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+  } else {
+    child.kill('SIGKILL');
+  }
+}
+
 /**
  * The child must never be able to reach a billed API path. Claude Code resolves
  * credentials in order, so any of these present would shadow the user's
@@ -80,6 +90,8 @@ export class Runner extends EventEmitter {
     this.transcript = []; // { role, kind, text, at }
     this._buf = '';
     this._partial = '';
+    this._resuming = false;
+    this._restarting = false;
   }
 
   get alive() {
@@ -107,7 +119,10 @@ export class Runner extends EventEmitter {
       '--output-format', 'stream-json',
       '--verbose',
       '--include-partial-messages',
-      '--session-id', this.sessionId,
+      // Re-attaching to the same conversation after a restart keeps everything
+      // said so far (verified in scripts/spike/README.md), which is what lets
+      // "지켜보기" be toggled mid-task instead of only at hire time.
+      ...(this._resuming ? ['--resume', this.sessionId] : ['--session-id', this.sessionId]),
       '--model', p.model || config.defaultModel,
       '--permission-mode', p.permissionMode || 'default',
       '--add-dir', toPosix(this.workdir),
@@ -176,9 +191,38 @@ export class Runner extends EventEmitter {
     });
 
     this.child.on('close', (code) => {
+      // A restart tears the process down on purpose — that is not the person
+      // leaving, so don't report it as an exit.
+      if (this._restarting) return;
       this.state = 'exited';
       this.emit('exit', { code, error: code === 0 ? null : this.stderr.slice(-500) || null });
     });
+  }
+
+  /**
+   * Swap the process for a new one attached to the same conversation. Used when
+   * the tool set has to change (attaching a visible browser), which the CLI
+   * cannot do to a running session.
+   */
+  async restart({ mcpServers } = {}) {
+    if (mcpServers) this.opts.mcpServers = mcpServers;
+    const old = this.child;
+    this._restarting = true;
+    if (old && old.exitCode === null) {
+      try { old.stdin.end(); } catch { /* already closed */ }
+      await new Promise((resolve) => {
+        const done = setTimeout(() => { killTree(old); resolve(); }, 4000);
+        old.once('close', () => { clearTimeout(done); resolve(); });
+      });
+    }
+    this._restarting = false;
+    this._resuming = true;
+    this._buf = '';
+    this._partial = '';
+    this.state = 'idle';
+    this._spawn(this.buildArgs(), { viaShell: false });
+    this.emit('change');
+    return this;
   }
 
   _onStdout(chunk) {
@@ -296,16 +340,8 @@ export class Runner extends EventEmitter {
     if (!this.child) return;
     try { this.child.stdin.end(); } catch { /* already closed */ }
     const child = this.child;
-    // Give it a moment to exit cleanly, then take the whole tree down. On Windows
-    // the shell hop means child.kill() would orphan the real `claude` process.
-    setTimeout(() => {
-      if (!child || child.exitCode !== null) return;
-      if (isWin && child.pid) {
-        spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
-      } else {
-        child.kill('SIGKILL');
-      }
-    }, 1500);
+    // Give it a moment to exit cleanly, then take the whole tree down.
+    setTimeout(() => killTree(child), 1500);
   }
 
   /** What the UI needs to draw this person. */

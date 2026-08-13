@@ -99,6 +99,10 @@ function toPublic(a) {
 /** Reading and searching don't need a click; acting on the world does. */
 function isAutoAllowed(tool) {
   if (tool.startsWith('mcp__office__')) return true; // the app's own tools
+  // Watching the browser work is the whole point of the checkbox — asking to
+  // approve every click would make it unwatchable. Turning the checkbox off
+  // detaches the browser entirely, so this only applies where it was asked for.
+  if (tool.startsWith('mcp__playwright__')) return true;
   return (config.autoAllowTools ?? []).includes(tool);
 }
 
