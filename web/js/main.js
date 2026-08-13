@@ -54,6 +54,19 @@ const el = {
   hireWatch: document.getElementById('hire-watch'),
   personaList: document.getElementById('persona-list'),
   hireCancel: document.getElementById('hire-cancel'),
+  files: document.getElementById('files'),
+  attachments: document.getElementById('attachments'),
+  openTypes: document.getElementById('open-types'),
+  types: document.getElementById('types'),
+  typeTabs: document.getElementById('type-tabs'),
+  typeSystem: document.getElementById('type-system'),
+  skillPick: document.getElementById('skill-pick'),
+  skillBody: document.getElementById('skill-body'),
+  skillNew: document.getElementById('skill-new'),
+  skillDel: document.getElementById('skill-del'),
+  typesSave: document.getElementById('types-save'),
+  typesClose: document.getElementById('types-close'),
+  typeSaved: document.getElementById('type-saved'),
 };
 
 const office = new Office(el.office, el.plates);
@@ -179,10 +192,11 @@ el.composer.addEventListener('submit', async (e) => {
   e.preventDefault();
   const text = el.prompt.value.trim();
   const person = selectedPerson();
-  if (!text || !person) return;
+  if ((!text && !pending.length) || !person) return;
   el.prompt.value = '';
   el.send.disabled = true;
-  await api(`/api/crew/${person.id}/send`, { method: 'POST', body: { text } });
+  const files = await uploadPending(person.id);
+  await api(`/api/crew/${person.id}/send`, { method: 'POST', body: { text, files } });
   el.send.disabled = false;
   el.prompt.focus();
 });
@@ -273,6 +287,138 @@ function hash(str) {
   }
   return h;
 }
+
+// ── attachments ──────────────────────────────────────────────────────────
+// Files are copied into that person's work folder and the message names them by
+// path; the person reads them with its own tools.
+let pending = [];
+
+el.files.addEventListener('change', () => {
+  pending = [...el.files.files];
+  el.files.value = '';
+  renderAttachments();
+});
+
+function renderAttachments() {
+  el.attachments.innerHTML = '';
+  pending.forEach((f, i) => {
+    const chip = document.createElement('span');
+    chip.className = 'chip';
+    chip.textContent = `${f.name} ✕`;
+    chip.title = '빼기';
+    chip.style.cursor = 'pointer';
+    chip.addEventListener('click', () => { pending.splice(i, 1); renderAttachments(); });
+    el.attachments.appendChild(chip);
+  });
+}
+
+/**
+ * Base64 over JSON rather than multipart: this is localhost, the files are the
+ * kind a person hands a colleague, and it saves hand-rolling a multipart parser
+ * in a zero-dependency server.
+ */
+async function uploadPending(personId) {
+  if (!pending.length) return [];
+  const files = await Promise.all(pending.map(async (f) => ({
+    name: f.name,
+    data: btoa(String.fromCharCode(...new Uint8Array(await f.arrayBuffer()))),
+  })));
+  const out = await api(`/api/crew/${personId}/files`, { method: 'POST', body: { files } });
+  pending = [];
+  renderAttachments();
+  return out.files ?? [];
+}
+
+// ── type + skill editor ──────────────────────────────────────────────────
+const editor = { key: null, persona: null, skill: null, dirty: new Map() };
+
+el.openTypes.addEventListener('click', () => openTypes());
+el.typesClose.addEventListener('click', () => { el.types.hidden = true; });
+el.types.addEventListener('click', (e) => { if (e.target === el.types) el.types.hidden = true; });
+
+async function openTypes() {
+  el.types.hidden = false;
+  el.typeSaved.textContent = '';
+  el.typeTabs.innerHTML = '';
+  for (const p of store.personas) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = p.label;
+    b.dataset.key = p.key;
+    b.addEventListener('click', () => loadType(p.key));
+    el.typeTabs.appendChild(b);
+  }
+  await loadType(store.personas[0]?.key);
+}
+
+async function loadType(key) {
+  if (!key) return;
+  editor.key = key;
+  editor.dirty.clear();
+  for (const b of el.typeTabs.children) b.classList.toggle('on', b.dataset.key === key);
+  const persona = await api(`/api/personas/${encodeURIComponent(key)}`);
+  editor.persona = persona;
+  el.typeSystem.value = persona.systemPrompt ?? '';
+  el.skillPick.innerHTML = '';
+  for (const s of persona.skills ?? []) {
+    const o = document.createElement('option');
+    o.value = s.name;
+    o.textContent = s.name;
+    el.skillPick.appendChild(o);
+  }
+  selectSkill(persona.skills?.[0]?.name ?? null);
+}
+
+function selectSkill(name) {
+  // Keep unsaved edits when flipping between skills in the same type.
+  if (editor.skill) editor.dirty.set(editor.skill, el.skillBody.value);
+  editor.skill = name;
+  el.skillPick.value = name ?? '';
+  const saved = editor.persona?.skills?.find((s) => s.name === name);
+  el.skillBody.value = editor.dirty.get(name) ?? saved?.body ?? '';
+  el.skillBody.disabled = !name;
+}
+
+el.skillPick.addEventListener('change', () => selectSkill(el.skillPick.value));
+
+el.skillNew.addEventListener('click', () => {
+  const name = prompt('새 스킬 이름 (영문 소문자와 하이픈)', 'new-skill');
+  if (!name || !/^[a-z0-9][a-z0-9-]*$/.test(name)) return;
+  const o = document.createElement('option');
+  o.value = name;
+  o.textContent = name;
+  el.skillPick.appendChild(o);
+  editor.persona.skills.push({ name, body: '' });
+  selectSkill(name);
+  el.skillBody.value = `---\nname: ${name}\ndescription: 언제 이 스킬을 쓰는지 한 문장으로.\n---\n\n## 어떻게 하는지\n`;
+  el.skillBody.focus();
+});
+
+el.skillDel.addEventListener('click', async () => {
+  if (!editor.skill) return;
+  if (!confirm(`"${editor.skill}" 스킬을 지울까요?`)) return;
+  await api(`/api/personas/${encodeURIComponent(editor.key)}/skills/${encodeURIComponent(editor.skill)}`, { method: 'DELETE' });
+  await loadType(editor.key);
+});
+
+el.typesSave.addEventListener('click', async () => {
+  if (!editor.key) return;
+  el.typesSave.disabled = true;
+  if (editor.skill) editor.dirty.set(editor.skill, el.skillBody.value);
+
+  await api(`/api/personas/${encodeURIComponent(editor.key)}`, {
+    method: 'POST', body: { systemPrompt: el.typeSystem.value },
+  });
+  for (const [name, body] of editor.dirty) {
+    await api(`/api/personas/${encodeURIComponent(editor.key)}/skills/${encodeURIComponent(name)}`, {
+      method: 'POST', body: { body },
+    });
+  }
+  editor.dirty.clear();
+  el.typesSave.disabled = false;
+  el.typeSaved.textContent = '저장했습니다 — 다음에 부르는 사람부터 적용됩니다.';
+  setTimeout(() => { el.typeSaved.textContent = ''; }, 4000);
+});
 
 // ── panels ───────────────────────────────────────────────────────────────
 function renderCrew() {

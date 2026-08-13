@@ -16,6 +16,7 @@
         <b>claude-crew</b>
         <small id="version"></small>
       </div>
+      <button type="button" id="open-types" class="ghost tiny" title="유형과 스킬 편집">유형</button>
     </header>
 
     <section class="panel">
@@ -79,12 +80,17 @@
             <span>알아서 하게 두기</span>
           </label>
         </div>
+        <div id="attachments" class="attachments"></div>
         <div class="row">
           <textarea id="prompt" rows="2" placeholder="시킬 일을 적으세요.  (Enter 전송 · Shift+Enter 줄바꿈)"></textarea>
           <button type="submit" id="send">보내기</button>
         </div>
         <div class="row end">
-          <button type="button" id="dismiss" class="ghost">퇴근시키기</button>
+          <label class="ghost tiny file-btn">
+            파일 붙이기
+            <input type="file" id="files" multiple hidden>
+          </label>
+          <button type="button" id="dismiss" class="ghost tiny">퇴근시키기</button>
         </div>
       </form>
     </section>
@@ -103,6 +109,36 @@
     </label>
     <div class="sheet-actions">
       <button type="button" id="hire-cancel" class="ghost">취소</button>
+    </div>
+  </div>
+</div>
+
+<!-- 유형·스킬 편집 -->
+<div id="types" class="modal" hidden>
+  <div class="sheet wide">
+    <h3>유형과 스킬</h3>
+    <p class="hint-sm">여기서 고친 내용은 <b>다음에 부르는 사람부터</b> 적용됩니다.</p>
+    <div class="types-body">
+      <nav id="type-tabs" class="type-tabs"></nav>
+      <div class="type-editor">
+        <label class="field">
+          <span>이 유형의 성격 (system.md)</span>
+          <textarea id="type-system" rows="10" spellcheck="false"></textarea>
+        </label>
+        <div class="skills-head">
+          <span>스킬</span>
+          <select id="skill-pick"></select>
+          <button type="button" id="skill-new" class="ghost tiny">새 스킬</button>
+          <button type="button" id="skill-del" class="ghost tiny">삭제</button>
+        </div>
+        <textarea id="skill-body" rows="12" spellcheck="false"
+          placeholder="---&#10;name: 스킬-이름&#10;description: 언제 이 스킬을 쓰는지 — 이 문장을 보고 사람이 스스로 꺼내 씁니다.&#10;---&#10;&#10;## 어떻게 하는지"></textarea>
+      </div>
+    </div>
+    <div class="sheet-actions">
+      <span id="type-saved" class="saved"></span>
+      <button type="button" id="types-close" class="ghost">닫기</button>
+      <button type="button" id="types-save">저장</button>
     </div>
   </div>
 </div>

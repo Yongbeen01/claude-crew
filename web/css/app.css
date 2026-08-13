@@ -58,6 +58,7 @@ button, textarea, input { font: inherit; color: inherit; }
   align-items: center;
   gap: 10px;
 }
+.brand > div { flex: 1; min-width: 0; }
 .brand b { display: block; letter-spacing: .2px; }
 .brand small { color: var(--ink-mute); font-size: 11px; }
 .logo {
@@ -355,3 +356,48 @@ button.ghost:hover { color: var(--ink); border-color: #4d4437; }
 .persona canvas { image-rendering: pixelated; }
 .persona b { display: block; font-size: 13px; }
 .persona small { color: var(--ink-mute); font-size: 11px; }
+
+/* ── type + skill editor ───────────────────────────────────────────────── */
+button.tiny { padding: 3px 9px; font-size: 11px; }
+.file-btn { cursor: pointer; display: inline-flex; align-items: center; }
+
+.attachments { display: flex; flex-wrap: wrap; gap: 5px; }
+.attachments:empty { display: none; }
+.attachments .chip {
+  font-size: 11px; color: var(--ink-dim);
+  background: var(--panel-2); border: 1px solid var(--line);
+  border-radius: 999px; padding: 2px 9px;
+}
+
+.sheet.wide { width: min(880px, 94vw); }
+.types-body { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 14px; }
+.type-tabs { display: grid; gap: 5px; align-content: start; }
+.type-tabs button {
+  background: none; border: 1px solid var(--line); color: var(--ink-dim);
+  text-align: left; font-weight: 500; padding: 7px 10px;
+}
+.type-tabs button.on { border-color: var(--accent); color: var(--ink); background: var(--panel-2); }
+
+.type-editor { display: grid; gap: 10px; min-width: 0; }
+.field { display: grid; gap: 5px; }
+.field > span { font-size: 11px; color: var(--ink-mute); }
+.type-editor textarea {
+  width: 100%;
+  background: #16130f;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 11px;
+  color: var(--ink);
+  font: 12px/1.6 "Cascadia Mono", Consolas, ui-monospace, monospace;
+  resize: vertical;
+  outline: none;
+}
+.type-editor textarea:focus { border-color: #4d4437; }
+.skills-head { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--ink-mute); }
+.skills-head select {
+  flex: 1;
+  background: var(--panel-2); border: 1px solid var(--line);
+  border-radius: 7px; padding: 4px 8px; font-size: 12px; outline: none;
+}
+.sheet-actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
+.saved { margin-right: auto; font-size: 12px; color: var(--ok); }

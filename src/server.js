@@ -61,7 +61,8 @@ function json(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
-function readBody(req, limit = 8 * 1024 * 1024) {
+// Attachments ride in as base64 JSON, so the cap has to fit a real spreadsheet.
+function readBody(req, limit = 64 * 1024 * 1024) {
   return new Promise((resolve, reject) => {
     let size = 0;
     const chunks = [];
@@ -238,8 +239,18 @@ export function createServer() {
       if (sub === 'send' && req.method === 'POST') {
         const body = await readBody(req);
         const text = String(body.text ?? '').trim();
-        if (!text) return json(res, 400, { ok: false, error: '빈 프롬프트' });
-        return json(res, 200, { ok: crew.send(id, text) });
+        const files = Array.isArray(body.files) ? body.files : [];
+        if (!text && !files.length) return json(res, 400, { ok: false, error: '빈 프롬프트' });
+        // Attachments are named in the message, so the person can just read them.
+        const message = files.length
+          ? [text, '', '첨부한 파일:', ...files.map((f) => `- ${f}`)].join('\n').trim()
+          : text;
+        return json(res, 200, { ok: crew.send(id, message) });
+      }
+
+      if (sub === 'files' && req.method === 'POST') {
+        const body = await readBody(req);
+        return json(res, 200, { ok: true, files: crew.attach(id, body.files) });
       }
       if (sub === 'transcript') {
         return json(res, 200, { personId: id, entries: crew.transcript(id) });

@@ -134,7 +134,7 @@ function announce() {
 }
 
 /** Wire a runner's events into the office bus. */
-function attach(person) {
+function wireRunner(person) {
   const r = person.runner;
 
   r.on('change', () => announce());
@@ -225,7 +225,7 @@ export function hire(personaKey, opts = {}) {
   });
 
   people.set(person.id, person);
-  attach(person);
+  wireRunner(person);
   person.runner.start();
 
   // The person opens the conversation, not the user. The kickoff never appears
@@ -309,6 +309,30 @@ export function send(id, text, opts = {}) {
   }
   announce();
   return ok;
+}
+
+/**
+ * Copy attachments into this person's work folder. The message then names them
+ * by absolute path and the person opens them with its own tools — no special
+ * file-passing channel, and the files stay put for the rest of the session.
+ */
+export function attach(id, files) {
+  const person = people.get(id);
+  if (!person) return [];
+  const dir = path.join(SESSIONS_DIR, id, 'inbox');
+  fs.mkdirSync(dir, { recursive: true });
+  const saved = [];
+  for (const f of files ?? []) {
+    // Only the basename: a crafted name must not be able to write outside the
+    // person's own folder.
+    const name = path.basename(String(f?.name ?? '')).replace(/[\\/:*?"<>|]/g, '_');
+    if (!name || !f?.data) continue;
+    const file = path.join(dir, name);
+    fs.writeFileSync(file, Buffer.from(String(f.data), 'base64'));
+    saved.push(file);
+  }
+  if (saved.length) logActivity('file', `${person.name} ← 파일 ${saved.length}개`, id);
+  return saved;
 }
 
 export function fire(id, { keepFiles = true } = {}) {
