@@ -12,7 +12,13 @@ import {
  */
 
 const CELL_W = 96;
-const CELL_H = 92;
+const CELL_H = 96;
+/** Where a workstation sits inside its cell — the rug is sized to this, not to
+ *  the cell, or a taller cell stretches it into the next row's nameplate. */
+const RUG_TOP = 22;
+const RUG_H = 56;
+const STAND_Y = 46; // floor point the person stands on
+const DESK_Y = 74; // front edge of the desk
 const COLS = 2;
 const WALL_TOP = 46;
 const WALL = 4;
@@ -84,8 +90,8 @@ export class Office {
     const o = this._seatOrigin(seat, layout);
     return {
       cx: o.x + CELL_W / 2,
-      standY: o.y + 46,
-      deskY: o.y + 74,
+      standY: o.y + STAND_Y,
+      deskY: o.y + DESK_Y,
       x: o.x,
       y: o.y,
     };
@@ -142,7 +148,7 @@ export class Office {
     for (let seat = 0; seat < this.seats; seat += 1) {
       const a = this._seatAnchor(seat, layout);
       const person = bySeat.get(seat) ?? null;
-      rug(ctx, a.x + 6, a.y + 24, CELL_W - 12, CELL_H - 32, RUGS[seat % RUGS.length]);
+      rug(ctx, a.x + 6, a.y + RUG_TOP, CELL_W - 12, RUG_H, RUGS[seat % RUGS.length]);
 
       if (!person) {
         chair(ctx, a.cx, a.standY + 4, '#5a5f6e');
@@ -220,7 +226,7 @@ export class Office {
     if (this.selectedId === person.id) {
       ctx.save();
       ctx.globalAlpha = 0.9;
-      const box = { x: a.x + 4, y: a.y + 20, w: CELL_W - 8, h: CELL_H - 26 };
+      const box = { x: a.x + 4, y: a.y + RUG_TOP - 2, w: CELL_W - 8, h: RUG_H + 4 };
       px(ctx, box.x, box.y, box.w, 1, '#f0b45a');
       px(ctx, box.x, box.y + box.h - 1, box.w, 1, '#f0b45a');
       px(ctx, box.x, box.y, 1, box.h, '#f0b45a');
