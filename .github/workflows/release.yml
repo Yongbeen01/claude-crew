@@ -1,0 +1,45 @@
+name: release
+
+# 태그를 밀면 압축본을 붙여 릴리스를 만듭니다.
+# git 이 없는 PC 는 이 zip 으로 설치되고, 앱의 자동 갱신도 이걸 봅니다.
+#
+#   git tag v0.2.0 && git push origin v0.2.0
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: 태그와 package.json 버전이 같은지 확인
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$pkg" ]; then
+            echo "태그 $tag 와 package.json $pkg 이 다릅니다" >&2
+            exit 1
+          fi
+
+      - name: 문법 검사
+        run: for f in src/*.js web/js/*.js; do node --check "$f"; done
+
+      - name: 압축본 만들기
+        run: |
+          zip -r "claude-crew-${GITHUB_REF_NAME}.zip" . \
+            -x '.git/*' '.github/*' 'node_modules/*' '.data/*'
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: claude-crew-*.zip
+          generate_release_notes: true

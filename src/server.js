@@ -11,6 +11,7 @@ import * as jobs from './jobs.js';
 import * as timers from './timers.js';
 import { handle as handleMcp, personIdForToken } from './mcpServer.js';
 import * as approvals from './approvals.js';
+import { updateStatus, checkForUpdate, applyUpdate } from './update.js';
 
 const WEB_DIR = path.join(ROOT, 'web');
 const MIME = {
@@ -52,6 +53,7 @@ bus.on('timer', (t) => broadcast('timer', t));
 bus.on('notify', (n) => broadcast('notify', n));
 bus.on('approvals', (a) => broadcast('approvals', a));
 bus.on('approval-resolved', (a) => broadcast('approval-resolved', a));
+bus.on('update', (u) => broadcast('update', u));
 
 function json(res, status, body) {
   res.writeHead(status, {
@@ -106,6 +108,7 @@ function fullState() {
     tasks: timers.publicState(),
     approvals: approvals.listApprovals(),
     approvalHistory: approvals.approvalHistory(),
+    update: updateStatus(),
     activity: recentActivity(),
     system: systemStats(),
     usage: usageReport(),
@@ -286,6 +289,16 @@ export function createServer() {
     }
 
     if (p === '/api/tasks') return json(res, 200, timers.publicState());
+
+    // ---- self update -------------------------------------------------------
+    if (p === '/api/update') {
+      if (req.method === 'POST') {
+        const result = await applyUpdate();
+        return json(res, result.ok ? 200 : 400, result);
+      }
+      if (url.searchParams.get('check') === '1') return json(res, 200, await checkForUpdate());
+      return json(res, 200, updateStatus());
+    }
 
     // ---- personas ----------------------------------------------------------
     if (p === '/api/personas') return json(res, 200, { personas: listPersonas().map(publicPersona) });

@@ -67,6 +67,10 @@ const el = {
   typesSave: document.getElementById('types-save'),
   typesClose: document.getElementById('types-close'),
   typeSaved: document.getElementById('type-saved'),
+  updateBar: document.getElementById('update-bar'),
+  updateText: document.getElementById('update-text'),
+  updateApply: document.getElementById('update-apply'),
+  updateHide: document.getElementById('update-hide'),
 };
 
 const office = new Office(el.office, el.plates);
@@ -94,12 +98,14 @@ function connect() {
     Object.assign(store, {
       crew: s.crew, personas: s.personas, activity: s.activity, approvals: s.approvals,
       jobs: s.jobs, tasks: s.tasks, system: s.system, usage: s.usage, meta: s.meta,
+      update: s.update,
     });
     el.version.textContent = `v${s.meta?.version ?? ''}`;
     renderAll();
   });
 
   es.addEventListener('crew', (e) => { store.crew = JSON.parse(e.data); renderCrew(); });
+  es.addEventListener('update', (e) => { store.update = JSON.parse(e.data); renderUpdate(); });
   es.addEventListener('approvals', (e) => { store.approvals = JSON.parse(e.data); renderApprovals(); });
   es.addEventListener('jobs', (e) => { store.jobs = JSON.parse(e.data); renderJobs(); });
   es.addEventListener('tasks', (e) => { store.tasks = JSON.parse(e.data); renderTasks(); });
@@ -566,7 +572,33 @@ function renderActivity() {
   }
 }
 
+// ── self update ──────────────────────────────────────────────────────────
+let updateDismissed = false;
+
+function renderUpdate() {
+  const u = store.update;
+  el.updateBar.hidden = !u?.behind || updateDismissed;
+  if (el.updateBar.hidden) return;
+  el.updateText.textContent = '새 버전이 있습니다. 받아서 다시 시작하면 적용됩니다 — 업무 이력과 유형 설정은 그대로 남습니다.';
+}
+
+el.updateHide.addEventListener('click', () => { updateDismissed = true; renderUpdate(); });
+
+el.updateApply.addEventListener('click', async () => {
+  el.updateApply.disabled = true;
+  el.updateText.textContent = '받는 중…';
+  const r = await api('/api/update', { method: 'POST' });
+  el.updateApply.disabled = false;
+  if (r.ok) {
+    el.updateText.textContent = '받았습니다. 바탕화면 아이콘으로 다시 시작하면 적용됩니다.';
+    el.updateApply.hidden = true;
+  } else {
+    el.updateText.textContent = r.error ?? '업데이트하지 못했습니다.';
+  }
+});
+
 function renderAll() {
+  renderUpdate();
   renderCrew();
   renderUsage();
   renderSystem();

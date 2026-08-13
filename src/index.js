@@ -6,6 +6,7 @@ import { startSystemPolling } from './system.js';
 import { startUsagePolling } from './usage.js';
 import { shutdownAll, poke, all as allCrew, setSummary } from './crew.js';
 import { refreshSummaries } from './summarize.js';
+import { startUpdatePolling } from './update.js';
 import * as timers from './timers.js';
 import { logActivity } from './bus.js';
 
@@ -44,6 +45,7 @@ server.listen(config.port, config.host, () => {
   // Nameplate captions. Cheap, throttled, and skipped for anyone already
   // showing a job name.
   setInterval(() => refreshSummaries(allCrew(), setSummary), 15_000).unref?.();
+  startUpdatePolling();
 
   if (config.openBrowserOnStart) openBrowser(baseUrl);
 });
