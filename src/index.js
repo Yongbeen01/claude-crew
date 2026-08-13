@@ -4,7 +4,8 @@ import { createServer } from './server.js';
 import { seedPersonas, listPersonas } from './personas.js';
 import { startSystemPolling } from './system.js';
 import { startUsagePolling } from './usage.js';
-import { shutdownAll } from './crew.js';
+import { shutdownAll, poke } from './crew.js';
+import * as timers from './timers.js';
 import { logActivity } from './bus.js';
 
 ensureDirs();
@@ -33,6 +34,10 @@ server.listen(config.port, config.host, () => {
   console.log('');
 
   logActivity('system', 'claude-crew 시작');
+  // A countdown mark is delivered by the person whose task it is, in their own
+  // voice, rather than as a system banner.
+  timers.bindPoke(poke);
+  timers.load();
   startSystemPolling();
   startUsagePolling();
 
@@ -54,6 +59,7 @@ function shutdown() {
   if (closing) return;
   closing = true;
   console.log('\n종료 중… 세션을 정리합니다.');
+  timers.shutdown();
   shutdownAll();
   server.close();
   // Give the taskkill in Runner.stop() a beat to land before the process goes.

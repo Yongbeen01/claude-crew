@@ -7,6 +7,9 @@ import * as crew from './crew.js';
 import { listPersonas, saveSkill, deleteSkill, savePersonaMeta, saveSystemPrompt } from './personas.js';
 import { systemStats } from './system.js';
 import { usageReport } from './usage.js';
+import * as jobs from './jobs.js';
+import * as timers from './timers.js';
+import { handle as handleMcp } from './mcpServer.js';
 
 const WEB_DIR = path.join(ROOT, 'web');
 const MIME = {
@@ -42,6 +45,10 @@ bus.on('activity', (e) => broadcast('activity', e));
 bus.on('system', (s) => broadcast('system', s));
 bus.on('usage', (u) => broadcast('usage', u));
 bus.on('personas', (p) => broadcast('personas', p));
+bus.on('jobs', (j) => broadcast('jobs', j));
+bus.on('tasks', (t) => broadcast('tasks', t));
+bus.on('timer', (t) => broadcast('timer', t));
+bus.on('notify', (n) => broadcast('notify', n));
 
 function json(res, status, body) {
   res.writeHead(status, {
@@ -91,6 +98,8 @@ function fullState() {
   return {
     crew: crew.snapshot(),
     personas: listPersonas().map(publicPersona),
+    jobs: jobs.listJobs(),
+    tasks: timers.publicState(),
     activity: recentActivity(),
     system: systemStats(),
     usage: usageReport(),
@@ -142,6 +151,14 @@ export function createServer() {
     if (req.method === 'OPTIONS') {
       res.writeHead(204, { 'access-control-allow-headers': '*', 'access-control-allow-methods': '*' });
       return res.end();
+    }
+
+    // ---- the office's own MCP server ---------------------------------------
+    // Sessions reach this at /mcp/<their token>; the token is how we know who
+    // called. See scripts/spike/3-app-mcp.mjs.
+    if (p.startsWith('/mcp/')) {
+      const body = req.method === 'POST' ? await readBody(req).catch(() => ({})) : null;
+      if (handleMcp(req, res, p, body)) return undefined;
     }
 
     // ---- live state --------------------------------------------------------
@@ -199,7 +216,24 @@ export function createServer() {
         const body = await readBody(req);
         return json(res, 200, { ok: crew.setWatch(id, body.on === true) });
       }
+      // Dropping a job card on someone: they get the accumulated briefing.
+      if (sub === 'job' && req.method === 'POST') {
+        const body = await readBody(req);
+        return json(res, 200, { ok: crew.assignJob(id, String(body.jobName ?? '').trim()) });
+      }
     }
+
+    // ---- jobs + today's tasks ----------------------------------------------
+    if (p === '/api/jobs') return json(res, 200, { jobs: jobs.listJobs() });
+
+    if (p.startsWith('/api/jobs/')) {
+      const name = decodeURIComponent(p.split('/')[3] ?? '');
+      const job = jobs.listJobs().find((j) => j.slug === name || j.name === name);
+      if (!job) return json(res, 404, { error: 'unknown job' });
+      return json(res, 200, jobs.getJob(job.name));
+    }
+
+    if (p === '/api/tasks') return json(res, 200, timers.publicState());
 
     // ---- personas ----------------------------------------------------------
     if (p === '/api/personas') return json(res, 200, { personas: listPersonas().map(publicPersona) });

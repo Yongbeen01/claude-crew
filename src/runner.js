@@ -120,7 +120,9 @@ export class Runner extends EventEmitter {
     for (const dir of this.opts.pluginDirs ?? []) args.push('--plugin-dir', toPosix(dir));
 
     if (Array.isArray(p.tools) && p.tools.length) args.push('--tools', p.tools.join(','));
-    if (Array.isArray(p.allowedTools) && p.allowedTools.length) args.push('--allowedTools', ...p.allowedTools);
+
+    const allowed = [...(p.allowedTools ?? []), ...(this.opts.alwaysAllowTools ?? [])];
+    if (allowed.length) args.push('--allowedTools', ...allowed);
     if (Array.isArray(p.disallowedTools) && p.disallowedTools.length) {
       args.push('--disallowedTools', ...p.disallowedTools);
     }

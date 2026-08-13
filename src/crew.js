@@ -6,6 +6,8 @@ import { bus, logActivity } from './bus.js';
 import { Runner } from './runner.js';
 import { loadPersona } from './personas.js';
 import { paths, readJson, writeJson } from './store.js';
+import { issueToken, revokeTokensFor, mcpConfigFor, officeToolNames, bindHooks } from './mcpServer.js';
+import { briefing } from './jobs.js';
 
 /**
  * Who is sitting in the office right now.
@@ -185,12 +187,18 @@ export function hire(personaKey, opts = {}) {
   person.persona = persona;
   person.jobName = opts.jobName ?? null;
 
+  // Everything already known about this job rides in on the system prompt, so
+  // the user does not have to explain it a second time.
+  const brief = opts.jobName ? briefing(opts.jobName) : '';
+  const token = issueToken(person.id);
+
   person.runner = new Runner({
     personId: person.id,
     persona,
-    appendSystemPrompt: opts.appendSystemPrompt,
+    appendSystemPrompt: [brief, opts.appendSystemPrompt].filter(Boolean).join('\n\n'),
     pluginDirs: [persona.dir],
-    mcpServers: opts.mcpServers ?? {},
+    mcpServers: { ...mcpConfigFor(token), ...(opts.mcpServers ?? {}) },
+    alwaysAllowTools: officeToolNames(),
     settingsJson: opts.settingsJson,
   });
 
@@ -200,11 +208,54 @@ export function hire(personaKey, opts = {}) {
 
   // The person opens the conversation, not the user. The kickoff never appears
   // in the transcript as something the user typed.
-  if (persona.kickoff) person.runner.send(persona.kickoff, { hidden: true });
+  const kickoff = opts.jobName ? jobKickoff(persona, opts.jobName) : persona.kickoff;
+  if (kickoff) person.runner.send(kickoff, { hidden: true });
 
   persist();
   announce();
   return person;
+}
+
+/**
+ * A person hired onto a known job greets differently: they already have the
+ * briefing, so they either ask the one thing they still need or just start.
+ */
+function jobKickoff(persona, jobName) {
+  return [
+    `당신은 방금 자리에 앉았고, "${jobName}" 일을 맡았습니다.`,
+    '시스템 프롬프트에 지난번까지 정리된 방식이 들어 있습니다. 이미 아는 것은 묻지 마세요.',
+    '한 문장으로 무슨 일을 맡았는지 확인하고, 정말 필요한 질문만 한 번에 물어보세요.',
+    '물어볼 게 없으면 바로 시작하세요.',
+  ].join(' ');
+}
+
+/** Hand a running person a job after the fact (drag a card onto them). */
+export function assignJob(id, jobName) {
+  const person = people.get(id);
+  if (!person?.runner) return false;
+  person.jobName = jobName || null;
+  persist();
+  announce();
+  if (!jobName) return true;
+
+  const brief = briefing(jobName);
+  person.runner.send(
+    [
+      `[업무 배정] 지금부터 "${jobName}" 일을 맡습니다.`,
+      brief,
+      '한 문장으로 확인하고, 이 내용으로 판단이 안 서는 것만 물어보세요. 없으면 바로 시작하세요.',
+    ].filter(Boolean).join('\n\n'),
+    { hidden: true },
+  );
+  logActivity('job', `${person.name} ← ${jobName}`, id);
+  return true;
+}
+
+/** Timers call this so a countdown mark is spoken by the person, not the app. */
+export function poke(id, text) {
+  const person = people.get(id);
+  if (!person?.runner?.alive) return false;
+  return person.runner.send(text, { hidden: true });
 }
 
 export function send(id, text, opts = {}) {
@@ -223,6 +274,7 @@ export function fire(id, { keepFiles = true } = {}) {
   const person = people.get(id);
   if (!person) return false;
   person.runner?.stop();
+  revokeTokensFor(id);
   people.delete(id);
   if (!keepFiles) {
     fs.rmSync(path.join(SESSIONS_DIR, id), { recursive: true, force: true });
@@ -274,3 +326,13 @@ export function shutdownAll() {
 export function lastSeating() {
   return readJson(paths.crew(), { people: [] });
 }
+
+// The MCP tools act on whoever called them; give that layer the two things it
+// needs without importing crew.js back and creating a cycle.
+bindHooks({
+  setSummary,
+  getPerson: (id) => {
+    const p = people.get(id);
+    return p ? { name: p.name, personaKey: p.personaKey, jobName: p.jobName } : null;
+  },
+});
