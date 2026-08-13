@@ -9,7 +9,8 @@ import { systemStats } from './system.js';
 import { usageReport } from './usage.js';
 import * as jobs from './jobs.js';
 import * as timers from './timers.js';
-import { handle as handleMcp } from './mcpServer.js';
+import { handle as handleMcp, personIdForToken } from './mcpServer.js';
+import * as approvals from './approvals.js';
 
 const WEB_DIR = path.join(ROOT, 'web');
 const MIME = {
@@ -49,6 +50,8 @@ bus.on('jobs', (j) => broadcast('jobs', j));
 bus.on('tasks', (t) => broadcast('tasks', t));
 bus.on('timer', (t) => broadcast('timer', t));
 bus.on('notify', (n) => broadcast('notify', n));
+bus.on('approvals', (a) => broadcast('approvals', a));
+bus.on('approval-resolved', (a) => broadcast('approval-resolved', a));
 
 function json(res, status, body) {
   res.writeHead(status, {
@@ -100,6 +103,8 @@ function fullState() {
     personas: listPersonas().map(publicPersona),
     jobs: jobs.listJobs(),
     tasks: timers.publicState(),
+    approvals: approvals.listApprovals(),
+    approvalHistory: approvals.approvalHistory(),
     activity: recentActivity(),
     system: systemStats(),
     usage: usageReport(),
@@ -153,6 +158,21 @@ export function createServer() {
       return res.end();
     }
 
+    // ---- hook receiver ------------------------------------------------------
+    // /hook/<person token>/<Event>. The PreToolUse response is held open until
+    // someone clicks; the decision IS the response body.
+    if (p.startsWith('/hook/')) {
+      const [, , token, event] = p.split('/');
+      const personId = personIdForToken(token);
+      const payload = await readBody(req).catch(() => ({}));
+      if (event !== 'PreToolUse' || !personId) return json(res, 200, {});
+
+      const result = approvals.requestApproval(personId, payload);
+      if (!result.held) return json(res, 200, approvals.decisionBody(result.decision));
+      const decision = await result.promise;
+      return json(res, 200, approvals.decisionBody(decision));
+    }
+
     // ---- the office's own MCP server ---------------------------------------
     // Sessions reach this at /mcp/<their token>; the token is how we know who
     // called. See scripts/spike/3-app-mcp.mjs.
@@ -173,13 +193,25 @@ export function createServer() {
       });
       res.write(': connected\n\n');
       viewers.add(res);
+      approvals.setViewerCount(viewers.size);
       sse(res, 'state', fullState());
       const ping = setInterval(() => res.write(': ping\n\n'), 15000);
       req.on('close', () => {
         clearInterval(ping);
         viewers.delete(res);
+        // Closing the last tab must never leave a person frozen on a card that
+        // is no longer on any screen.
+        approvals.setViewerCount(viewers.size);
       });
       return undefined;
+    }
+
+    // ---- approvals ---------------------------------------------------------
+    if (p.startsWith('/api/approvals/') && req.method === 'POST') {
+      const id = p.split('/')[3];
+      const body = await readBody(req);
+      const decision = ['allow', 'deny', 'ask'].includes(body.decision) ? body.decision : 'ask';
+      return json(res, 200, { ok: approvals.resolve(id, decision, 'user') });
     }
 
     // ---- crew --------------------------------------------------------------
@@ -220,6 +252,13 @@ export function createServer() {
       if (sub === 'job' && req.method === 'POST') {
         const body = await readBody(req);
         return json(res, 200, { ok: crew.assignJob(id, String(body.jobName ?? '').trim()) });
+      }
+      // "이 사람은 그냥 알아서 하게 두기" — stop asking for every tool.
+      if (sub === 'trust' && req.method === 'POST') {
+        const body = await readBody(req);
+        const swallowed = approvals.setTrusted(id, body.on === true);
+        crew.touch(id);
+        return json(res, 200, { ok: true, on: approvals.isTrusted(id), resolved: swallowed });
       }
     }
 

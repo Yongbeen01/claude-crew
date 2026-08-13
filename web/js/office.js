@@ -264,7 +264,9 @@ export class Office {
 
       const chips = [];
       const s = person.session;
-      if (s?.currentTool) chips.push(`▶ ${s.currentTool}`);
+      if (person.approvalCount) chips.push(`승인 ${person.approvalCount}건`);
+      else if (s?.currentTool) chips.push(`▶ ${s.currentTool}`);
+      if (person.trusted) chips.push('알아서');
       if (person.watch) chips.push('지켜보는 중');
       if (person.state === 'exited') chips.push('종료됨');
       const chipEl = plate.querySelector('.chips');
@@ -287,6 +289,12 @@ export class Office {
 
   _hit(p) {
     return this.hitboxes.find((b) => p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h) ?? null;
+  }
+
+  /** Which seat is under a page coordinate — used as a drop target for job cards. */
+  hitAtClient(clientX, clientY) {
+    const r = this.canvas.getBoundingClientRect();
+    return this._hit({ x: (clientX - r.left) / this.scale, y: (clientY - r.top) / this.scale });
   }
 
   _onMove(e) {

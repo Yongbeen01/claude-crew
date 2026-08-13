@@ -1,13 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { config, SESSIONS_DIR } from './config.js';
+import { config, baseUrl, SESSIONS_DIR } from './config.js';
 import { bus, logActivity } from './bus.js';
 import { Runner } from './runner.js';
 import { loadPersona } from './personas.js';
 import { paths, readJson, writeJson } from './store.js';
 import { issueToken, revokeTokensFor, mcpConfigFor, officeToolNames, bindHooks } from './mcpServer.js';
 import { briefing } from './jobs.js';
+import * as approvals from './approvals.js';
+import { forgetSummary } from './summarize.js';
 
 /**
  * Who is sitting in the office right now.
@@ -45,10 +47,17 @@ class Person {
     if (!this.runner) return 'offline';
     const r = this.runner;
     if (!r.alive) return 'exited';
+    // Waiting on a click outranks "working" — it is the one state the user has
+    // to do something about.
+    if (this.approvalCount > 0) return 'awaiting_approval';
     if (r.state === 'working') return 'working';
     if (r.state === 'starting') return 'starting';
     if (Date.now() - r.lastActivityAt > config.idleAfterMs) return 'sleeping';
     return 'idle';
+  }
+
+  get approvalCount() {
+    return approvals.approvalsByPerson().get(this.id)?.length ?? 0;
   }
 
   toJSON() {
@@ -66,6 +75,8 @@ class Person {
       // one-liner. Never both — the nameplate has one line.
       caption: this.jobName || this.summary || '',
       state: this.state,
+      approvalCount: this.approvalCount,
+      trusted: approvals.isTrusted(this.id),
       createdAt: this.createdAt,
       session: r,
       // FNV-1a over the id: the same person always gets the same face.
@@ -144,6 +155,11 @@ function attach(person) {
   r.on('tool', (t) => {
     if (t.phase === 'start') {
       logActivity('tool', `${person.name} — ${t.name}`, person.id);
+    } else {
+      // The tool ran, so its approval card is settled — drop just that card.
+      // We learn this from the output stream, which is why the session needs no
+      // PostToolUse hook.
+      approvals.resolveStale(person.id, t.id, 'done');
     }
     announce();
   });
@@ -152,6 +168,8 @@ function attach(person) {
     if (ev.is_error) {
       logActivity('error', `${person.name} — 턴 실패: ${String(ev.result ?? '').slice(0, 80)}`, person.id);
     }
+    // Turn over: nothing can still be blocking on a decision.
+    approvals.resolveAllFor(person.id, config.approvalFallbackDecision, 'turn-end');
     announce();
   });
 
@@ -199,7 +217,7 @@ export function hire(personaKey, opts = {}) {
     pluginDirs: [persona.dir],
     mcpServers: { ...mcpConfigFor(token), ...(opts.mcpServers ?? {}) },
     alwaysAllowTools: officeToolNames(),
-    settingsJson: opts.settingsJson,
+    settingsJson: sessionSettings(token),
   });
 
   people.set(person.id, person);
@@ -214,6 +232,25 @@ export function hire(personaKey, opts = {}) {
   persist();
   announce();
   return person;
+}
+
+/**
+ * The only hook a person needs. `PreToolUse` fires for every tool call in
+ * headless mode and its response decides whether the call happens, so this is
+ * where "허용 / 거부" in the office actually takes effect. The long timeout is
+ * the hold — the call is released the moment it is decided or the turn ends.
+ * (`PermissionRequest` looks like the right hook and is never called in `-p`
+ * mode; that cost an afternoon. See scripts/spike/README.md.)
+ */
+function sessionSettings(token) {
+  const hold = config.approvalHoldMs > 0 ? Math.ceil(config.approvalHoldMs / 1000) + 15 : 86_400;
+  return JSON.stringify({
+    hooks: {
+      PreToolUse: [
+        { hooks: [{ type: 'http', url: `${baseUrl}/hook/${token}/PreToolUse`, timeout: hold }] },
+      ],
+    },
+  });
 }
 
 /**
@@ -275,11 +312,20 @@ export function fire(id, { keepFiles = true } = {}) {
   if (!person) return false;
   person.runner?.stop();
   revokeTokensFor(id);
+  approvals.forget(id);
+  forgetSummary(id);
   people.delete(id);
   if (!keepFiles) {
     fs.rmSync(path.join(SESSIONS_DIR, id), { recursive: true, force: true });
   }
   persist();
+  announce();
+  return true;
+}
+
+/** Push a fresh snapshot without waiting for the next runner event. */
+export function touch(id) {
+  if (id && !people.has(id)) return false;
   announce();
   return true;
 }
@@ -317,6 +363,11 @@ export function transcript(id, limit = 200) {
 
 export function shutdownAll() {
   for (const person of people.values()) person.runner?.stop();
+}
+
+/** Everyone currently seated — used by the summariser. */
+export function all() {
+  return [...people.values()];
 }
 
 /**

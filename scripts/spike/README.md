@@ -58,6 +58,37 @@ fixture 플러그인(`fixtures/persona-test`)에 암호를 답하는 스킬을 �
 
 → `mcpServer.js` 를 `server.js` 안에 `/mcp/<token>` 라우트로 얹는다.
 
+## 4. 헤드리스에서 승인을 중계하는 훅은 `PreToolUse` 다 — `PermissionRequest` 가 아니다
+
+claude-office 는 `PermissionRequest` 훅의 HTTP 응답을 붙잡아 승인 UI 를 만들었다. 같은 방식을
+그대로 옮겼더니 카드가 한 번도 안 떴다. 훅 수신기를 세워 놓고 4가지 permission-mode 로 각각
+`-p` 세션을 돌려 확인한 결과:
+
+| permission-mode | PermissionRequest 훅 호출 | 파일 생성 |
+| --- | --- | --- |
+| default | **0회** | 안 됨 |
+| manual | **0회** | 안 됨 |
+| dontAsk | **0회** | 안 됨 |
+| acceptEdits | 0회 | 됨 (묻지 않고 통과) |
+
+`PermissionRequest` 는 **대화형 세션 전용**이다. claude-office 는 남이 띄운 대화형 세션을
+관찰하니까 됐던 것이고, 우리처럼 `-p` 로 직접 띄운 세션에서는 영영 안 불린다.
+
+반면 `PreToolUse` 는 헤드리스에서 정상 동작한다:
+
+- 모든 도구 호출마다 불린다 (Write, PowerShell 둘 다 확인)
+- `permissionDecision: "allow"` → 실제로 실행됨 (파일 생성됨)
+- `permissionDecision: "deny"` → 차단되고 사유가 모델에게 전달됨
+- **응답을 지연시킬 수 있다** (3초 붙잡아 확인) → 이게 승인 대기의 정체
+
+→ `crew.js` 의 `sessionSettings()` 는 `PreToolUse` 훅을 심고, `approvals.js` 는
+`{hookSpecificOutput:{hookEventName:'PreToolUse', permissionDecision, permissionDecisionReason}}`
+를 응답 바디로 돌려준다.
+
+부수 효과: 훅이 **모든** 도구에 걸리므로 읽기 계열(`Read`/`Glob`/`Grep`/`Skill` 등)과 오피스 자체
+도구는 훅 안에서 자동 허용한다(`config.autoAllowTools`). 안 그러면 파일 하나 읽을 때마다
+클릭을 요구해서 쓸 수 없다.
+
 ## 공통으로 확인된 것
 
 - **Windows**: `spawn(bin, args)` 가 안 먹어서 argv 를 한 문자열로 합쳐 `shell: true` 로 띄운다.

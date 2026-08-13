@@ -23,6 +23,17 @@
       <div id="usage" class="usage"><p class="muted">확인 중…</p></div>
     </section>
 
+    <section class="panel" id="today-panel" hidden>
+      <h2>오늘</h2>
+      <div id="tasks" class="tasks"></div>
+    </section>
+
+    <section class="panel" id="jobs-panel" hidden>
+      <h2>자주 하는 일</h2>
+      <p class="hint-sm">카드를 사람에게 끌어다 놓으면 설명 없이 그 일을 시작합니다.</p>
+      <div id="jobs" class="jobs"></div>
+    </section>
+
     <section class="panel">
       <h2>이 컴퓨터</h2>
       <div id="system" class="system"></div>
@@ -47,16 +58,27 @@
   </main>
 
   <aside class="col right">
+    <section class="panel approvals-panel" id="approvals-panel" hidden>
+      <h2>승인 기다리는 중</h2>
+      <div id="approvals"></div>
+    </section>
+
     <section class="panel chat-panel grow">
       <h2 id="chat-title">대화</h2>
       <div id="chat" class="chat">
         <p class="muted empty">사람을 고르면 여기서 대화합니다.</p>
       </div>
       <form id="composer" class="composer" hidden>
-        <label class="watch">
-          <input type="checkbox" id="watch">
-          <span>작업 과정 지켜보기</span>
-        </label>
+        <div class="toggles">
+          <label class="watch">
+            <input type="checkbox" id="watch">
+            <span>작업 과정 지켜보기</span>
+          </label>
+          <label class="watch">
+            <input type="checkbox" id="trust">
+            <span>알아서 하게 두기</span>
+          </label>
+        </div>
         <div class="row">
           <textarea id="prompt" rows="2" placeholder="시킬 일을 적으세요.  (Enter 전송 · Shift+Enter 줄바꿈)"></textarea>
           <button type="submit" id="send">보내기</button>

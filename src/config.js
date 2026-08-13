@@ -42,12 +42,24 @@ const DEFAULTS = {
   idleAfterMs: 5 * 60 * 1000,
 
   /**
-   * How long a PermissionRequest hook is held open waiting for a click.
-   * 0 = hold until clicked. Closing every browser tab releases them anyway.
+   * How long a tool call is held waiting for a click. 0 = until decided.
+   * Unlike claude-office — which was holding up the user's own IDE — holding
+   * here only parks a background worker, so waiting is the sane default.
    */
   approvalHoldMs: 0,
   approvalFallbackDecision: 'ask',
-  holdOnlyWhenViewerConnected: true,
+  holdOnlyWhenViewerConnected: false,
+
+  /**
+   * Tools that never need a click. Reading and searching are reversible and
+   * asking about each one would make the office unusable; anything that writes,
+   * runs, or sends is left to the user.
+   */
+  autoAllowTools: [
+    'Read', 'Glob', 'Grep', 'NotebookRead',
+    'Skill', 'ToolSearch', 'TodoWrite',
+    'WebSearch', 'WebFetch',
+  ],
 
   openBrowserOnStart: true,
 

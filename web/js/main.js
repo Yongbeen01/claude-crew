@@ -13,6 +13,9 @@ const store = {
   crew: [],
   personas: [],
   activity: [],
+  approvals: [],
+  jobs: [],
+  tasks: { tasks: [], timer: null },
   system: null,
   usage: null,
   meta: { maxSeats: 4 },
@@ -34,11 +37,19 @@ const el = {
   send: document.getElementById('send'),
   dismiss: document.getElementById('dismiss'),
   watch: document.getElementById('watch'),
+  trust: document.getElementById('trust'),
+  approvals: document.getElementById('approvals'),
+  approvalsPanel: document.getElementById('approvals-panel'),
   activity: document.getElementById('activity'),
   usage: document.getElementById('usage'),
   system: document.getElementById('system'),
   version: document.getElementById('version'),
   hint: document.getElementById('hint'),
+  stage: document.querySelector('.stage'),
+  tasks: document.getElementById('tasks'),
+  todayPanel: document.getElementById('today-panel'),
+  jobs: document.getElementById('jobs'),
+  jobsPanel: document.getElementById('jobs-panel'),
   hire: document.getElementById('hire'),
   hireWatch: document.getElementById('hire-watch'),
   personaList: document.getElementById('persona-list'),
@@ -68,14 +79,17 @@ function connect() {
   es.addEventListener('state', (e) => {
     const s = JSON.parse(e.data);
     Object.assign(store, {
-      crew: s.crew, personas: s.personas, activity: s.activity,
-      system: s.system, usage: s.usage, meta: s.meta,
+      crew: s.crew, personas: s.personas, activity: s.activity, approvals: s.approvals,
+      jobs: s.jobs, tasks: s.tasks, system: s.system, usage: s.usage, meta: s.meta,
     });
     el.version.textContent = `v${s.meta?.version ?? ''}`;
     renderAll();
   });
 
   es.addEventListener('crew', (e) => { store.crew = JSON.parse(e.data); renderCrew(); });
+  es.addEventListener('approvals', (e) => { store.approvals = JSON.parse(e.data); renderApprovals(); });
+  es.addEventListener('jobs', (e) => { store.jobs = JSON.parse(e.data); renderJobs(); });
+  es.addEventListener('tasks', (e) => { store.tasks = JSON.parse(e.data); renderTasks(); });
   es.addEventListener('personas', (e) => { store.personas = JSON.parse(e.data); });
   es.addEventListener('system', (e) => { store.system = JSON.parse(e.data); renderSystem(); });
   es.addEventListener('usage', (e) => { store.usage = JSON.parse(e.data); renderUsage(); });
@@ -139,6 +153,7 @@ function renderChat() {
   el.chatTitle.textContent = `${person.name} · ${person.personaLabel}`;
   el.composer.hidden = false;
   el.watch.checked = !!person.watch;
+  el.trust.checked = !!person.trusted;
 
   const msgs = store.chats.get(person.id) ?? [];
   const streaming = store.streaming.get(person.id);
@@ -183,6 +198,12 @@ el.watch.addEventListener('change', async () => {
   const person = selectedPerson();
   if (!person) return;
   await api(`/api/crew/${person.id}/watch`, { method: 'POST', body: { on: el.watch.checked } });
+});
+
+el.trust.addEventListener('change', async () => {
+  const person = selectedPerson();
+  if (!person) return;
+  await api(`/api/crew/${person.id}/trust`, { method: 'POST', body: { on: el.trust.checked } });
 });
 
 el.dismiss.addEventListener('click', async () => {
@@ -286,6 +307,94 @@ function renderUsage() {
   }
 }
 
+function renderApprovals() {
+  const list = store.approvals ?? [];
+  el.approvalsPanel.hidden = list.length === 0;
+  el.approvals.innerHTML = '';
+  for (const a of list) {
+    const person = store.crew.find((p) => p.id === a.personId);
+    const card = document.createElement('div');
+    card.className = 'approval';
+    card.innerHTML = `<div class="who"></div><div class="what"></div><pre></pre>
+      <div class="acts"><button class="allow">허용</button><button class="deny">거부</button></div>`;
+    card.querySelector('.who').textContent = person ? `${person.name} · ${person.personaLabel}` : '';
+    card.querySelector('.what').textContent = a.title;
+    const pre = card.querySelector('pre');
+    if (a.detail) pre.textContent = a.detail; else pre.remove();
+    card.querySelector('.allow').addEventListener('click', () => decide(a.id, 'allow'));
+    card.querySelector('.deny').addEventListener('click', () => decide(a.id, 'deny'));
+    el.approvals.appendChild(card);
+  }
+}
+
+async function decide(id, decision) {
+  await api(`/api/approvals/${id}`, { method: 'POST', body: { decision } });
+}
+
+function renderTasks() {
+  const { tasks = [], timer } = store.tasks ?? {};
+  el.todayPanel.hidden = tasks.length === 0 && !timer;
+  el.tasks.innerHTML = '';
+  for (const t of tasks) {
+    const row = document.createElement('div');
+    row.className = `task${timer?.taskName === t.name ? ' running' : ''}`;
+    const b = document.createElement('b');
+    b.textContent = t.name;
+    const s = document.createElement('span');
+    s.textContent = t.minutes ? `${t.minutes}분` : '';
+    row.append(b, s);
+    el.tasks.appendChild(row);
+  }
+  if (timer) {
+    const note = document.createElement('div');
+    note.className = 'running-note';
+    const mins = Math.ceil((timer.remainingMs ?? 0) / 60000);
+    note.textContent = `▶ ${timer.taskName} — ${mins}분 남음`;
+    el.tasks.appendChild(note);
+  }
+}
+
+function renderJobs() {
+  // A job only becomes a card once it has been done at least once; a one-off
+  // isn't a habit worth offering.
+  const list = (store.jobs ?? []).filter((j) => j.runCount >= 1);
+  el.jobsPanel.hidden = list.length === 0;
+  el.jobs.innerHTML = '';
+  for (const j of list) {
+    const card = document.createElement('div');
+    card.className = 'job-card';
+    card.draggable = true;
+    card.innerHTML = '<b></b><small></small>';
+    card.querySelector('b').textContent = j.name;
+    card.querySelector('small').textContent =
+      `${j.runCount}회${j.avgMinutes ? ` · 보통 ${j.avgMinutes}분` : ''}`;
+    card.addEventListener('dragstart', (e) => {
+      e.dataTransfer.setData('text/plain', j.name);
+      e.dataTransfer.effectAllowed = 'copy';
+      el.stage.classList.add('drop-target');
+    });
+    card.addEventListener('dragend', () => el.stage.classList.remove('drop-target'));
+    el.jobs.appendChild(card);
+  }
+}
+
+// Dropping a card on someone hands them the job plus everything the office has
+// learned about it — that is the whole point of the card.
+el.stage.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'copy';
+});
+el.stage.addEventListener('drop', async (e) => {
+  e.preventDefault();
+  el.stage.classList.remove('drop-target');
+  const jobName = e.dataTransfer.getData('text/plain');
+  if (!jobName) return;
+  const hit = office.hitAtClient(e.clientX, e.clientY);
+  if (!hit?.person) return;
+  await api(`/api/crew/${hit.person.id}/job`, { method: 'POST', body: { jobName } });
+  select(hit.person.id);
+});
+
 function renderSystem() {
   const s = store.system;
   if (!s) return;
@@ -316,6 +425,9 @@ function renderAll() {
   renderUsage();
   renderSystem();
   renderActivity();
+  renderApprovals();
+  renderTasks();
+  renderJobs();
   renderChat();
 }
 

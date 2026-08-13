@@ -35,6 +35,11 @@ export function revokeTokensFor(personId) {
   for (const [token, id] of tokens) if (id === personId) tokens.delete(token);
 }
 
+/** The same token also identifies a person's hook callbacks. */
+export function personIdForToken(token) {
+  return tokens.get(token) ?? null;
+}
+
 /** What goes into a session's --mcp-config. */
 export function mcpConfigFor(token) {
   return { office: { type: 'http', url: `${baseUrl}/mcp/${token}` } };

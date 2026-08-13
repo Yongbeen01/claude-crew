@@ -166,6 +166,38 @@ button, textarea, input { font: inherit; color: inherit; }
 .bar.bad > i { background: var(--bad); }
 .usage .resets { font-size: 11px; color: var(--ink-mute); margin-top: 2px; }
 
+.hint-sm { margin: -3px 0 8px; font-size: 11px; color: var(--ink-mute); }
+
+/* ── today's tasks + timer ─────────────────────────────────────────────── */
+.tasks { display: grid; gap: 5px; }
+.tasks .task {
+  display: flex; justify-content: space-between; gap: 8px;
+  font-size: 12px; color: var(--ink-dim);
+}
+.tasks .task b { font-weight: 500; color: var(--ink); }
+.tasks .task span { font-variant-numeric: tabular-nums; flex: none; }
+.tasks .task.running b { color: var(--accent); }
+.tasks .running-note {
+  margin-top: 4px; padding-top: 6px; border-top: 1px solid var(--line);
+  font-size: 12px; color: var(--accent); font-variant-numeric: tabular-nums;
+}
+
+/* ── job cards ─────────────────────────────────────────────────────────── */
+.jobs { display: grid; gap: 6px; }
+.job-card {
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  border-radius: 8px;
+  padding: 7px 9px;
+  cursor: grab;
+  user-select: none;
+}
+.job-card:active { cursor: grabbing; }
+.job-card:hover { border-color: var(--accent); }
+.job-card b { display: block; font-size: 12px; font-weight: 600; }
+.job-card small { color: var(--ink-mute); font-size: 11px; }
+.stage.drop-target { outline: 2px dashed var(--accent); outline-offset: -8px; border-radius: 12px; }
+
 .system { display: grid; gap: 7px; }
 .system .row { display: flex; justify-content: space-between; font-size: 12px; }
 .system .row span:last-child { color: var(--ink-dim); font-variant-numeric: tabular-nums; }
@@ -254,6 +286,36 @@ button.ghost:hover { color: var(--ink); border-color: #4d4437; }
   cursor: pointer;
 }
 .watch input { accent-color: var(--accent); }
+.toggles { display: flex; gap: 14px; flex-wrap: wrap; }
+
+/* ── approvals ─────────────────────────────────────────────────────────── */
+.approvals-panel { border-color: #5a3a33; }
+.approvals-panel h2 { color: #f0a79a; }
+.approval {
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel-2);
+  padding: 9px 10px;
+  margin-bottom: 8px;
+}
+.approval:last-child { margin-bottom: 0; }
+.approval .who { font-size: 11px; color: var(--ink-mute); }
+.approval .what { font-size: 13px; margin: 2px 0 5px; overflow-wrap: anywhere; }
+.approval pre {
+  margin: 0 0 7px;
+  font-size: 11px;
+  color: var(--ink-dim);
+  background: #1a1713;
+  border-radius: 6px;
+  padding: 6px 8px;
+  max-height: 110px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.approval .acts { display: flex; gap: 6px; }
+.approval .acts button { padding: 4px 11px; font-size: 12px; }
+.approval .acts .deny { background: #6d3a31; color: #ffd9d2; }
 
 /* ── hire sheet ────────────────────────────────────────────────────────── */
 .modal {
