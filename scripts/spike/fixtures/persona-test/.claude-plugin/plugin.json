@@ -1,0 +1,5 @@
+{
+  "name": "crew-persona-test",
+  "description": "Phase 0 fixture: proves --plugin-dir scopes a skill pack to one session.",
+  "version": "0.0.1"
+}

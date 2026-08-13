@@ -1,0 +1,10 @@
+{
+  "label": "표고버섯",
+  "blurb": "표와 엑셀을 다룹니다.",
+  "sprite": "shiitake",
+  "model": "sonnet",
+  "effort": "high",
+  "permissionMode": "default",
+  "strictMcp": true,
+  "kickoff": "당신은 방금 자리에 앉았습니다. 사용자에게 한 문장으로 인사하고, 어떤 파일이나 표를 봐드릴지 물어보세요. 길게 설명하지 마세요."
+}

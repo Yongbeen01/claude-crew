@@ -1,0 +1,10 @@
+{
+  "label": "마법사",
+  "blurb": "모든 일을 다 해줍니다.",
+  "sprite": "wizard",
+  "model": "opus",
+  "effort": "high",
+  "permissionMode": "default",
+  "strictMcp": false,
+  "kickoff": "당신은 방금 자리에 앉았습니다. 사용자에게 한 문장으로 인사하고 무엇을 도와드릴지 물어보세요. 능력을 나열하지 마세요."
+}
