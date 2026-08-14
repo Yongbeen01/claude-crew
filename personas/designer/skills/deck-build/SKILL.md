@@ -18,14 +18,9 @@ description: Use when the user asks for a presentation, slides, a deck, PPT, PPT
 
 ## 2. 파일 만들기
 
-작업 폴더(cwd)에 만든다. Node 는 반드시 설치돼 있으므로 `pptxgenjs` 가 가장 확실한 경로다.
-
-```bash
-npm init -y >/dev/null 2>&1
-npm install pptxgenjs --no-audit --no-fund
-```
-
-그 다음 `build-deck.mjs` 를 쓰고 `node build-deck.mjs` 로 실행한다. 최소 골격:
+작업 폴더(cwd)에 만든다. **`pptxgenjs` 는 이미 설치돼 있다** — 오피스가 공용 도구함을
+작업 폴더에 연결해 두므로 `npm install` 을 하지 마라. 바로 `build-deck.mjs` 를 쓰고
+`node build-deck.mjs` 로 실행하면 된다. 최소 골격:
 
 ```js
 import pptxgen from 'pptxgenjs';
@@ -42,8 +37,10 @@ s.addText([{ text: '근거 한 줄', options: { bullet: true } }], { x: 0.5, y: 
 await pptx.writeFile({ fileName: '제안서.pptx' });
 ```
 
-설치가 막히면(오프라인·프록시) 사용자에게 그 사실을 알리고, 대신 목차와 각 장 원고를
-마크다운으로 정리해서 준다. 조용히 포기하지 않는다.
+`Cannot find package 'pptxgenjs'` 가 나면 도구함이 아직 준비 중이거나 받지 못한 것이다.
+그때만 `npm install pptxgenjs --no-audit --no-fund` 를 직접 해 본다. 그것도 막히면
+(오프라인·사내 프록시) 사용자에게 그 사실을 알리고, 대신 목차와 각 장 원고를 마크다운으로
+정리해서 준다. 조용히 포기하지 않는다.
 
 ## 3. 디자인 기본값
 

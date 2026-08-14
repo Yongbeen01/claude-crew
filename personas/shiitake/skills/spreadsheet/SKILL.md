@@ -12,12 +12,8 @@ description: Use whenever the user mentions a spreadsheet, Excel, xlsx, xls, csv
 
 ## 1. 먼저 구조를 파악한다
 
-무엇을 할지 정하기 전에 읽는다. Node 는 반드시 있으므로 SheetJS 가 가장 확실하다.
-
-```bash
-npm init -y >/dev/null 2>&1
-npm install xlsx exceljs --no-audit --no-fund
-```
+무엇을 할지 정하기 전에 읽는다. **`xlsx`(SheetJS)와 `exceljs` 는 이미 설치돼 있다** —
+오피스가 공용 도구함을 작업 폴더에 연결해 두므로 `npm install` 을 하지 마라.
 
 ```js
 import XLSX from 'xlsx';
@@ -63,6 +59,10 @@ XLSX.writeFile(out, '결과_20260813.xlsx');
 - 날짜는 실제 날짜 값으로 넣는다. `2026-08-13` 같은 문자열로 넣지 않는다.
 
 CSV 로 달라고 하면 **UTF-8 BOM** 을 붙인다. 안 붙이면 Excel 에서 한글이 깨진다.
+
+`Cannot find package 'xlsx'` 가 나면 도구함이 아직 준비 중인 것이다. 그때만
+`npm install xlsx exceljs --no-audit --no-fund` 를 직접 해 보고, 그것도 막히면 사용자에게
+알린 뒤 읽을 수 있는 만큼(CSV 등)만 처리한다.
 
 ## 4. 보고
 

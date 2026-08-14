@@ -4,6 +4,7 @@ import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import path from 'node:path';
 import { config, SESSIONS_DIR } from './config.js';
+import { linkInto } from './toolbox.js';
 
 const isWin = process.platform === 'win32';
 
@@ -155,6 +156,9 @@ export class Runner extends EventEmitter {
 
   start() {
     fs.mkdirSync(this.workdir, { recursive: true });
+    // Give this person the shared document packages before it starts, so making
+    // a .pptx or .xlsx doesn't begin with an npm install.
+    linkInto(this.workdir);
     this._spawn(this.buildArgs(), { viaShell: false });
     this.emit('change');
     return this;

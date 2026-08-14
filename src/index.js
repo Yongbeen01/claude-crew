@@ -7,6 +7,7 @@ import { startUsagePolling } from './usage.js';
 import { shutdownAll, poke, all as allCrew, setSummary } from './crew.js';
 import { refreshSummaries } from './summarize.js';
 import { startUpdatePolling } from './update.js';
+import { ensureToolbox } from './toolbox.js';
 import * as timers from './timers.js';
 import { logActivity } from './bus.js';
 
@@ -46,6 +47,8 @@ server.listen(config.port, config.host, () => {
   // showing a job name.
   setInterval(() => refreshSummaries(allCrew(), setSummary), 15_000).unref?.();
   startUpdatePolling();
+  // PPT·엑셀용 공용 패키지. 처음 한 번만 받고, 그 뒤로는 사람마다 링크만 겁니다.
+  ensureToolbox();
 
   if (config.openBrowserOnStart) openBrowser(baseUrl);
 });

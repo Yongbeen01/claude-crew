@@ -12,6 +12,7 @@ import * as timers from './timers.js';
 import { handle as handleMcp, personIdForToken } from './mcpServer.js';
 import * as approvals from './approvals.js';
 import { updateStatus, checkForUpdate, applyUpdate } from './update.js';
+import { toolboxStatus } from './toolbox.js';
 
 const WEB_DIR = path.join(ROOT, 'web');
 const MIME = {
@@ -54,6 +55,7 @@ bus.on('notify', (n) => broadcast('notify', n));
 bus.on('approvals', (a) => broadcast('approvals', a));
 bus.on('approval-resolved', (a) => broadcast('approval-resolved', a));
 bus.on('update', (u) => broadcast('update', u));
+bus.on('toolbox', (t) => broadcast('toolbox', t));
 
 function json(res, status, body) {
   res.writeHead(status, {
@@ -109,6 +111,7 @@ function fullState() {
     approvals: approvals.listApprovals(),
     approvalHistory: approvals.approvalHistory(),
     update: updateStatus(),
+    toolbox: toolboxStatus(),
     activity: recentActivity(),
     system: systemStats(),
     usage: usageReport(),
