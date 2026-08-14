@@ -89,9 +89,18 @@ if (Test-Path (Join-Path $AppDir '.git')) {
 
 New-Item -ItemType Directory -Force -Path $DataDir | Out-Null
 
+# 이 한 줄(irm | iex)은 메모리에서 실행돼 실행 정책을 안 타지만, 여기서 부르는
+# .ps1 '파일'은 정책을 탑니다. 새 PC 기본값(Restricted)에서 막히므로 자식 스크립트는
+# 항상 별도 프로세스에 Bypass 를 명시해서 돌립니다. 사용자에게 정책을 바꾸라고
+# 시키지 않기 위해서입니다.
+function Invoke-Script($file, $extra = @()) {
+  $args = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $AppDir $file)) + $extra
+  & powershell.exe @args
+}
+
 # ── 4. 바로가기 ──────────────────────────────────────────────────────────────
 Step '바로가기 만들기'
-& (Join-Path $AppDir 'scripts\install-shortcut.ps1')
+Invoke-Script 'scripts\install-shortcut.ps1'
 
 # ── 5. 로그인 ────────────────────────────────────────────────────────────────
 Step 'Claude 로그인 확인'
@@ -107,7 +116,7 @@ if ($auth -match 'not logged in|No .*credential|로그인') {
 
 # ── 6. 실행 ──────────────────────────────────────────────────────────────────
 Step '실행'
-& (Join-Path $AppDir 'scripts\launch.ps1')
+Invoke-Script 'scripts\launch.ps1'
 
 Write-Host ""
 Write-Host "  설치 끝났습니다." -ForegroundColor Green
