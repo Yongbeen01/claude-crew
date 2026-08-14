@@ -395,6 +395,10 @@ body:has(.update-bar:not([hidden])) .app { height: calc(100% - 38px); }
 @keyframes msg-in-right { from { opacity: 0; transform: translate(6px, 6px) scale(.98); } }
 
 .composer { display: grid; gap: 7px; }
+/* `display: grid` outranks the UA's [hidden] rule, so without this the composer
+ * stays on screen when nobody is selected — asking you to send a message to
+ * no one, next to a 퇴근시키기 button for nobody. */
+.composer[hidden] { display: none; }
 .composer .row { display: flex; gap: 7px; align-items: stretch; }
 .composer .row.end { justify-content: flex-end; }
 .composer textarea {
