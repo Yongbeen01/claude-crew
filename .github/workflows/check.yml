@@ -38,8 +38,10 @@ jobs:
           exit $fail
 
       - name: 시크릿이 섞여 들어갔는지
+        # 이 파일 자신은 제외 — 아래 패턴이 자기 자신에 걸린다.
         run: |
-          if git grep -nEi "(sk-ant-|xoxb-|ghp_|github_pat_|BEGIN [A-Z ]*PRIVATE KEY)" -- . ; then
+          if git grep -nEi "(sk-ant-|xoxb-|ghp_|github_pat_|BEGIN [A-Z ]*PRIVATE KEY)" \
+               -- . ':(exclude).github/workflows/check.yml' ; then
             echo "::error::자격증명처럼 보이는 문자열이 있습니다"; exit 1
           fi
           echo "없음"
