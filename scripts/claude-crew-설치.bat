@@ -11,7 +11,7 @@ echo   claude-crew
 echo   Installing... this window will show progress.
 echo.
 
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/Yongbeen01/claude-crew/main/scripts/install.ps1 ^| iex"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/Yongbeen01/claude-crew/main/scripts/install.ps1 | iex"
 
 if errorlevel 1 (
   echo.
