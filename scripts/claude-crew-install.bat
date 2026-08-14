@@ -16,7 +16,7 @@ REM Clear the "downloaded from the internet" mark on ourselves.
 REM Without this, a .bat saved from a browser or a chat app is allowed to start
 REM but is refused permission to launch PowerShell: the window prints
 REM "Access is denied" and exits with code 5, which tells the user nothing.
-REM Overwriting the alternate data stream lifts it for this run too — verified.
+REM Overwriting the alternate data stream lifts it for this run too -- verified.
 type nul > "%~f0:Zone.Identifier" 2>nul
 
 set "PS=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"

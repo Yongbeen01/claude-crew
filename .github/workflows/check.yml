@@ -37,6 +37,23 @@ jobs:
           done
           exit $fail
 
+      - name: bat 규칙
+        # cmd.exe 는 .bat 을 OEM 코드페이지로 읽는다. 비ASCII 가 한 글자만 있어도
+        # 그 줄이 깨지고 받는 사람에게는 원인 모를 오류로 보인다.
+        # 그리고 인터넷에서 받은 .bat 은 Zone.Identifier 를 지우지 않으면
+        # PowerShell 을 띄우지 못하고 'Access is denied' (code 5) 로 끝난다.
+        run: |
+          fail=0
+          for f in scripts/*.bat; do
+            if LC_ALL=C grep -nP '[^\x00-\x7F]' "$f" >/dev/null; then
+              echo "::error file=$f::비ASCII 문자가 있습니다"; fail=1
+            fi
+            if ! grep -q 'Zone.Identifier' "$f"; then
+              echo "::error file=$f::인터넷 표식(Zone.Identifier)을 지우는 줄이 없습니다"; fail=1
+            fi
+          done
+          exit $fail
+
       - name: 시크릿이 섞여 들어갔는지
         # 이 파일 자신은 제외 — 아래 패턴이 자기 자신에 걸린다.
         run: |
