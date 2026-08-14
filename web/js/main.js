@@ -93,6 +93,104 @@ const el = {
   leaveNo: document.getElementById('leave-no'),
 };
 
+// ── chat width ───────────────────────────────────────────────────────────
+/**
+ * How wide the conversation gets to be. Long answers with tables and code want
+ * far more room than a nameplate does, and how much is a matter of what you are
+ * doing today — so it is a handle, and the choice is remembered.
+ *
+ * The room in the middle takes whatever is left and re-picks its own whole-number
+ * zoom every frame (office.js `_resizeToFit`), so nothing here has to tell it.
+ */
+const WIDTH_KEY = 'crew.chatWidth';
+const app = document.querySelector('.app');
+const resizer = document.getElementById('chat-resize');
+
+/** Never so wide that the room has no room, nor so narrow it cannot be grabbed back. */
+function clampWidth(px) {
+  const max = Math.max(300, Math.min(820, window.innerWidth - 560));
+  return Math.round(Math.max(280, Math.min(max, px)));
+}
+
+function setChatWidth(px, { save = true } = {}) {
+  const w = clampWidth(px);
+  app.style.setProperty('--right-w', `${w}px`);
+  resizer.setAttribute('aria-valuenow', String(w));
+  if (save) { try { localStorage.setItem(WIDTH_KEY, String(w)); } catch { /* private mode */ } }
+  return w;
+}
+
+function clearChatWidth() {
+  app.style.removeProperty('--right-w');
+  resizer.removeAttribute('aria-valuenow');
+  try { localStorage.removeItem(WIDTH_KEY); } catch { /* private mode */ }
+}
+
+function currentChatWidth() {
+  return document.querySelector('.right').getBoundingClientRect().width;
+}
+
+(function restoreChatWidth() {
+  let saved = null;
+  try { saved = localStorage.getItem(WIDTH_KEY); } catch { /* private mode */ }
+  if (saved) setChatWidth(Number(saved), { save: false });
+})();
+
+// A window that shrank below what the saved width allows gets the clamped one —
+// but the saved number is left alone, so widening the window restores it.
+window.addEventListener('resize', () => {
+  if (app.style.getPropertyValue('--right-w')) setChatWidth(currentChatWidth(), { save: false });
+});
+
+/*
+ * The drag listens on the window, not on the handle.
+ *
+ * Pointer capture is a request, not a guarantee. Were the handle holding the
+ * listeners, losing capture mid-drag would cost us the release: the column
+ * would keep its new width, the choice would never be written down, and the
+ * whole window would stay stuck in the resize cursor. The window always sees
+ * the release, so the commit cannot be missed.
+ */
+resizer.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0) return;
+  e.preventDefault();
+  const id = e.pointerId;
+  try { resizer.setPointerCapture(id); } catch { /* capture is a nicety */ }
+  resizer.classList.add('dragging');
+  document.body.classList.add('resizing');
+
+  // Measured from the right edge of the window, which is where this column ends.
+  const move = (ev) => {
+    if (ev.pointerId !== id) return;
+    setChatWidth(document.documentElement.clientWidth - ev.clientX, { save: false });
+  };
+  const up = (ev) => {
+    if (ev && ev.pointerId !== id) return;
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    window.removeEventListener('pointercancel', up);
+    resizer.classList.remove('dragging');
+    document.body.classList.remove('resizing');
+    setChatWidth(currentChatWidth()); // one write at the end, not one per pixel
+  };
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+  window.addEventListener('pointercancel', up);
+});
+
+// Double-click puts it back to whatever this screen size would have chosen.
+resizer.addEventListener('dblclick', clearChatWidth);
+
+resizer.addEventListener('keydown', (e) => {
+  const step = e.shiftKey ? 48 : 12;
+  if (e.key === 'ArrowLeft') setChatWidth(currentChatWidth() + step);
+  else if (e.key === 'ArrowRight') setChatWidth(currentChatWidth() - step);
+  else if (e.key === 'Home' || e.key === 'Escape') clearChatWidth();
+  else return;
+  e.preventDefault();
+});
+
+
 const office = new Office(el.office, el.plates);
 window.__office = office;
 
@@ -762,7 +860,9 @@ el.typesSave.addEventListener('click', async () => {
 
 // ── panels ───────────────────────────────────────────────────────────────
 function renderCrew() {
-  office.setState(store);
+  // 이 아래로는 남은 게 없다 — 화면 검증이 "다 떴다" 를 물어볼 수 있게 표시해 둔다.
+window.__crewReady = true;
+office.setState(store);
   const seated = store.crew.length;
   const leaving = store.crew.some((p) => p.state === 'leaving');
   el.hint.textContent = leaving
@@ -1147,89 +1247,6 @@ function renderAll() {
   renderChat();
 }
 window.__render = renderAll; // handy for the Playwright checks
-
-// ── chat width ───────────────────────────────────────────────────────────
-/**
- * How wide the conversation gets to be. Long answers with tables and code want
- * far more room than a nameplate does, and how much is a matter of what you are
- * doing today — so it is a handle, and the choice is remembered.
- *
- * The room in the middle takes whatever is left and re-picks its own whole-number
- * zoom every frame (office.js `_resizeToFit`), so nothing here has to tell it.
- */
-const WIDTH_KEY = 'crew.chatWidth';
-const app = document.querySelector('.app');
-const resizer = document.getElementById('chat-resize');
-
-/** Never so wide that the room has no room, nor so narrow it cannot be grabbed back. */
-function clampWidth(px) {
-  const max = Math.max(300, Math.min(820, window.innerWidth - 560));
-  return Math.round(Math.max(280, Math.min(max, px)));
-}
-
-function setChatWidth(px, { save = true } = {}) {
-  const w = clampWidth(px);
-  app.style.setProperty('--right-w', `${w}px`);
-  resizer.setAttribute('aria-valuenow', String(w));
-  if (save) { try { localStorage.setItem(WIDTH_KEY, String(w)); } catch { /* private mode */ } }
-  return w;
-}
-
-function clearChatWidth() {
-  app.style.removeProperty('--right-w');
-  resizer.removeAttribute('aria-valuenow');
-  try { localStorage.removeItem(WIDTH_KEY); } catch { /* private mode */ }
-}
-
-function currentChatWidth() {
-  return document.querySelector('.right').getBoundingClientRect().width;
-}
-
-(function restoreChatWidth() {
-  let saved = null;
-  try { saved = localStorage.getItem(WIDTH_KEY); } catch { /* private mode */ }
-  if (saved) setChatWidth(Number(saved), { save: false });
-})();
-
-// A window that shrank below what the saved width allows gets the clamped one —
-// but the saved number is left alone, so widening the window restores it.
-window.addEventListener('resize', () => {
-  if (app.style.getPropertyValue('--right-w')) setChatWidth(currentChatWidth(), { save: false });
-});
-
-resizer.addEventListener('pointerdown', (e) => {
-  if (e.button !== 0) return;
-  e.preventDefault();
-  resizer.setPointerCapture(e.pointerId);
-  resizer.classList.add('dragging');
-  document.body.classList.add('resizing');
-
-  // Measured from the right edge of the window, which is where this column ends.
-  const move = (ev) => setChatWidth(document.documentElement.clientWidth - ev.clientX, { save: false });
-  const up = () => {
-    resizer.removeEventListener('pointermove', move);
-    resizer.removeEventListener('pointerup', up);
-    resizer.removeEventListener('pointercancel', up);
-    resizer.classList.remove('dragging');
-    document.body.classList.remove('resizing');
-    setChatWidth(currentChatWidth()); // one write at the end, not one per pixel
-  };
-  resizer.addEventListener('pointermove', move);
-  resizer.addEventListener('pointerup', up);
-  resizer.addEventListener('pointercancel', up);
-});
-
-// Double-click puts it back to whatever this screen size would have chosen.
-resizer.addEventListener('dblclick', clearChatWidth);
-
-resizer.addEventListener('keydown', (e) => {
-  const step = e.shiftKey ? 48 : 12;
-  if (e.key === 'ArrowLeft') setChatWidth(currentChatWidth() + step);
-  else if (e.key === 'ArrowRight') setChatWidth(currentChatWidth() - step);
-  else if (e.key === 'Home' || e.key === 'Escape') clearChatWidth();
-  else return;
-  e.preventDefault();
-});
 
 // ── loop ─────────────────────────────────────────────────────────────────
 let last = 0;
