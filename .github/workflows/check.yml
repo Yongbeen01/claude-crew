@@ -1,0 +1,58 @@
+name: check
+
+# push 할 때마다 도는 최소한의 그물.
+# 여기서 잡는 것들은 전부 실제로 한 번씩 사고가 났던 항목입니다.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: 문법
+        run: for f in src/*.js web/js/*.js scripts/spike/*.mjs; do node --check "$f"; done
+
+      - name: BOM 규칙
+        # install.ps1 은 irm | iex 로 실행돼 BOM 이 있으면 첫 줄에 에러가 찍힌다.
+        # 반대로 -File 로 도는 스크립트는 BOM 이 없으면 PowerShell 5.1 이 ANSI 로
+        # 읽어 한글 파싱이 깨진다. 둘을 반대로 하면 조용히 망가진다.
+        run: |
+          bom() { [ "$(head -c3 "$1" | xxd -p)" = "efbbbf" ]; }
+          fail=0
+          if bom scripts/install.ps1; then
+            echo "::error file=scripts/install.ps1::BOM 이 있으면 irm | iex 가 깨집니다"; fail=1
+          fi
+          for f in scripts/launch.ps1 scripts/install-shortcut.ps1; do
+            if ! bom "$f"; then
+              echo "::error file=$f::-File 로 실행되므로 UTF-8 BOM 이 있어야 합니다"; fail=1
+            fi
+          done
+          exit $fail
+
+      - name: 시크릿이 섞여 들어갔는지
+        run: |
+          if git grep -nEi "(sk-ant-|xoxb-|ghp_|github_pat_|BEGIN [A-Z ]*PRIVATE KEY)" -- . ; then
+            echo "::error::자격증명처럼 보이는 문자열이 있습니다"; exit 1
+          fi
+          echo "없음"
+
+      - name: 사용자 데이터가 레포 밖에 있는지
+        # 업데이트는 레포를 통째로 덮어쓴다. 살아 있는 데이터가 레포 안에 있으면
+        # 갱신이 업무 이력과 편집한 유형을 지운다. (personas 만 예외로 레포에 '원본'
+        # 이 있고, 설치 때 DATA_DIR 로 복사된다 — SEED_PERSONAS_DIR.)
+        run: |
+          fail=0
+          for name in PERSONAS_DIR JOBS_DIR SESSIONS_DIR; do
+            if ! grep -qE "^export const $name = path\.join\(DATA_DIR" src/config.js; then
+              echo "::error file=src/config.js::$name 이 DATA_DIR 기준이 아닙니다"; fail=1
+            fi
+          done
+          exit $fail
