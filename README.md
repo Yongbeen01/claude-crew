@@ -18,13 +18,19 @@ PowerShell 을 열고 한 줄:
 irm https://raw.githubusercontent.com/Yongbeen01/claude-crew/main/scripts/install.ps1 | iex
 ```
 
-Node 와 Claude Code 가 없으면 알아서 설치하고, 바탕화면 바로가기를 만들고, Claude 로그인까지
+Node, git, Claude Code 가 없으면 알아서 챙기고, 바탕화면 바로가기를 만들고, Claude 로그인까지
 안내한 뒤 실행합니다. 다음부터는 **바탕화면의 claude-crew 아이콘**으로 열면 됩니다.
 
 필요한 것은 Windows 10/11 과 **Claude 유료 구독**(Pro / Max / Team) 뿐입니다.
+GitHub 계정도, 관리자 권한도 필요 없습니다 — 설치 프로그램 대신 무설치본을 받으므로
+권한 상승 창이 뜨지 않습니다.
 
-**GitHub 계정은 필요 없습니다.** 설치도 업데이트도 로그인 없이 받아 갑니다. Node, git,
-Claude Code 도 없으면 설치 과정에서 알아서 챙깁니다.
+> **왜 `.bat` 더블클릭이 아닌가.** `scripts/claude-crew-install.bat` 도 같이 들어 있고
+> 내용은 동일하지만, **Windows 11 의 Smart App Control 이 켜져 있으면 차단됩니다**
+> (`액세스가 거부되었습니다`, 코드 5 — 관리자 권한으로도 안 풀립니다). 인터넷에서 받은
+> 서명 없는 실행 파일이기 때문이고, 넘으려면 코드 서명 인증서가 필요합니다.
+> 위의 한 줄은 다운로드된 파일이 아니라 사용자가 직접 입력한 명령이라 이 정책에 걸리지
+> 않습니다. 그래서 이쪽이 기본입니다.
 
 ### 업데이트
 
