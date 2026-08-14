@@ -12,6 +12,13 @@ REM PowerShell is called by full path on purpose. Relying on PATH picks up
 REM whatever the launching environment happens to have, and on a machine with an
 REM unusual PATH that fails with a bare "Access is denied" the user cannot act on.
 
+REM Clear the "downloaded from the internet" mark on ourselves.
+REM Without this, a .bat saved from a browser or a chat app is allowed to start
+REM but is refused permission to launch PowerShell: the window prints
+REM "Access is denied" and exits with code 5, which tells the user nothing.
+REM Overwriting the alternate data stream lifts it for this run too — verified.
+type nul > "%~f0:Zone.Identifier" 2>nul
+
 set "PS=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
 if not exist "%PS%" set "PS=powershell.exe"
 
