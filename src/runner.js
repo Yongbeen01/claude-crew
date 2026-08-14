@@ -99,9 +99,30 @@ export class Runner extends EventEmitter {
     return !!this.child && this.child.exitCode === null && !this.child.killed;
   }
 
+  /**
+   * Rules every person gets, ahead of its own personality.
+   *
+   * These exist to overrule Claude Code's defaults, which are written for a
+   * developer at a terminal. Left alone a session obeys "always use the
+   * scratchpad directory for temporary files" and writes the user's deliverable
+   * into a temp path they will never find — observed, not theorised.
+   */
+  officeRules() {
+    return [
+      '# 이 사무실의 규칙',
+      '',
+      '- **결과물은 반드시 작업 폴더(현재 cwd)에 만든다.** 임시 폴더(scratchpad, Temp)에',
+      '  만들지 마라. 그 경로는 사용자가 찾을 수 없다. 중간 스크립트도 같은 폴더에 둔다.',
+      '- 사용자에게 경로를 알려줄 때는 작업 폴더 기준의 전체 경로를 그대로 적는다.',
+      '- 문서용 패키지(`pptxgenjs`, `xlsx`, `exceljs`)는 **작업 폴더에 이미 설치돼 있다.**',
+      '  `npm init` 이나 `npm install` 을 하지 마라. 바로 import 해서 쓰면 된다.',
+      '- 사용자는 개발자가 아니다. 경로·명령·패키지 이름을 늘어놓지 말고 무엇이 됐는지만 말한다.',
+    ].join('\n');
+  }
+
   /** The persona prompt plus any job briefing, written where argv can't mangle it. */
   writeSystemPrompt() {
-    const body = [this.persona?.systemPrompt, this.opts.appendSystemPrompt]
+    const body = [this.officeRules(), this.persona?.systemPrompt, this.opts.appendSystemPrompt]
       .filter(Boolean)
       .join('\n\n');
     if (!body.trim()) return null;
