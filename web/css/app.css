@@ -1,47 +1,89 @@
-/* claude-crew — cozy office, dark wood + warm paper. */
+/* claude-crew — cozy office, dark wood + warm paper.
+ *
+ * Craft notes (Apple's design language, translated to the web):
+ *  · Tracking is size-specific — large text tightens, 11px labels loosen.
+ *  · Chrome that floats over content is a translucent material, not an opaque bar.
+ *  · Feedback lives on pointer-*down* and is instant; travel is left to springs in JS.
+ *  · Where content meets floating chrome we fade the edge instead of ruling a line.
+ *  · Reduced motion / transparency / contrast each get a real answer at the bottom.
+ */
 
 :root {
   --bg: #171512;
+  --bg-2: #131110;
   --panel: #201d19;
   --panel-2: #262219;
   --line: #332d25;
+  --line-soft: #241f19;
   --ink: #efe7db;
-  --ink-dim: #a89c8b;
-  --ink-mute: #766c5f;
+  --ink-dim: #b3a695;
+  --ink-mute: #8b8073;
   --accent: #f0b45a;
+  --accent-ink: #241c0d;
   --ok: #7fd1c0;
   --warn: #e0a35b;
   --bad: #e0705b;
   --radius: 10px;
   --font: Pretendard, "Malgun Gothic", -apple-system, "Segoe UI", system-ui, sans-serif;
+  --mono: "Cascadia Mono", Consolas, ui-monospace, monospace;
+
+  /* One shadow scale — bigger surfaces read as thicker, so they cast deeper. */
+  --shadow-1: 0 1px 2px #0000004d;
+  --shadow-2: 0 6px 18px -6px #00000073, 0 1px 0 #ffffff0a inset;
+  --shadow-3: 0 28px 60px -18px #000000b3, 0 2px 0 #ffffff12 inset;
+
+  /* Press feedback: short enough to read as "instant", not as an animation. */
+  --press: 100ms cubic-bezier(0.2, 0, 0, 1);
+  --calm: 260ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 * { box-sizing: border-box; }
 
-html, body {
-  height: 100%;
-  margin: 0;
-}
+html, body { height: 100%; margin: 0; }
 
 body {
   background: var(--bg);
   color: var(--ink);
-  font: 14px/1.55 var(--font);
+  font: 14px/1.5 var(--font);
+  letter-spacing: 0; /* body sits at zero; only the extremes get tracking */
+  font-optical-sizing: auto;
+  -webkit-font-smoothing: antialiased;
   overflow: hidden;
 }
 
-button, textarea, input { font: inherit; color: inherit; }
+button, textarea, input, select { font: inherit; color: inherit; }
+
+/* Nothing on the input path should wait: no tap delay, no text-selection drag. */
+button, .plate, .job-card, .persona, .type-tabs button, .chip, .watch {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+/* The sheet takes focus when it opens so Esc works and screen readers land
+ * inside it — but it is a container, not a control, so it shows no ring. */
+.sheet:focus, .sheet:focus-visible { outline: none; }
 
 .muted { color: var(--ink-mute); }
 
 /* ── shell ─────────────────────────────────────────────────────────────── */
 body:has(.update-bar:not([hidden])) .app { height: calc(100% - 38px); }
 
+/* Floating chrome: a translucent layer over the room, not a painted strip. */
 .update-bar {
   display: flex; align-items: center; gap: 10px;
   height: 38px; padding: 0 14px;
-  background: #2e2716; border-bottom: 1px solid var(--line);
-  font-size: 12px; color: #f3e2c0;
+  background: #2e271699;
+  backdrop-filter: blur(24px) saturate(180%);
+  border-bottom: 1px solid #ffffff14;
+  box-shadow: var(--shadow-1);
+  /* Vibrancy: over a translucent surface, flat grey text dissolves. */
+  font-size: 12px; font-weight: 500; letter-spacing: .005em;
+  color: #f7e9cd;
 }
 .update-bar[hidden] { display: none; }
 .update-bar span { flex: 1; }
@@ -62,21 +104,27 @@ body:has(.update-bar:not([hidden])) .app { height: calc(100% - 38px); }
   overflow: hidden;
 }
 
-.left, .right { padding: 12px; gap: 12px; overflow-y: auto; }
-
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+/* Side columns are the structural material: heavier than the room they frame. */
+.left, .right {
+  padding: 12px; gap: 12px;
+  overflow-y: auto;
+  background: linear-gradient(var(--bg-2), var(--bg) 220px);
+  scrollbar-width: thin;
+  scrollbar-color: #3a332b transparent;
 }
+
+.brand { display: flex; align-items: center; gap: 10px; }
 .brand > div { flex: 1; min-width: 0; }
-.brand b { display: block; letter-spacing: .2px; }
-.brand small { color: var(--ink-mute); font-size: 11px; }
+.brand b {
+  display: block;
+  font-size: 14px; font-weight: 650;
+  letter-spacing: -.01em; /* names tighten as they gain weight */
+}
+.brand small { color: var(--ink-mute); font-size: 11px; letter-spacing: .02em; }
 .logo {
-  width: 22px; height: 22px; border-radius: 5px; flex: none;
-  background:
-    linear-gradient(135deg, var(--accent) 0 50%, #c8484f 50% 100%);
-  box-shadow: inset 0 0 0 2px #1b1814;
+  width: 22px; height: 22px; border-radius: 6px; flex: none;
+  background: linear-gradient(135deg, var(--accent) 0 50%, #c8484f 50% 100%);
+  box-shadow: inset 0 0 0 2px #1b1814, var(--shadow-1);
 }
 
 .panel {
@@ -85,12 +133,14 @@ body:has(.update-bar:not([hidden])) .app { height: calc(100% - 38px); }
   border-radius: var(--radius);
   padding: 11px 12px;
   min-height: 0;
+  /* A hairline of light on the top edge — the same trick a real bevel plays. */
+  box-shadow: var(--shadow-2);
 }
 .panel.grow { flex: 1; display: flex; flex-direction: column; }
 .panel h2 {
   margin: 0 0 8px;
   font-size: 11px;
-  letter-spacing: .09em;
+  letter-spacing: .09em; /* small text reads too tight — open it up */
   text-transform: uppercase;
   color: var(--ink-mute);
   font-weight: 600;
@@ -105,20 +155,34 @@ body:has(.update-bar:not([hidden])) .app { height: calc(100% - 38px); }
   display: grid;
   place-items: center;
   overflow: hidden;
+  /* Depth without a border: the room sits in a pool of light. */
+  background: radial-gradient(120% 90% at 50% 38%, #1d1a15 0%, var(--bg) 62%);
 }
 .viewport { position: relative; line-height: 0; }
-#office { display: block; image-rendering: pixelated; }
-#nameplates {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  line-height: 1.25;
+#office {
+  display: block;
+  image-rendering: pixelated;
+  border-radius: 4px;
+  box-shadow: 0 24px 48px -24px #000000cc;
 }
+#nameplates { position: absolute; inset: 0; pointer-events: none; line-height: 1.25; }
+
+/* The hint is chrome floating under the room, so it is a material too. */
 .hint {
-  padding: 8px 0 14px;
+  margin: 6px auto 14px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: #ffffff08;
+  backdrop-filter: blur(12px);
+  border: 1px solid #ffffff0f;
   color: var(--ink-mute);
-  font-size: 12px;
+  font-size: 12px; letter-spacing: .005em;
+  transition: color var(--calm), background var(--calm);
 }
+
+/* Drop target: the room lights up, no dashed cut-out. */
+.stage.drop-target { background: radial-gradient(120% 90% at 50% 38%, #262013 0%, var(--bg) 66%); }
+.stage.drop-target #office { box-shadow: 0 0 0 2px #f0b45a55, 0 24px 48px -24px #000000cc; }
 
 /* ── nameplates ────────────────────────────────────────────────────────── */
 .plate {
@@ -134,35 +198,59 @@ body:has(.update-bar:not([hidden])) .app { height: calc(100% - 38px); }
 }
 .plate b {
   display: inline-block;
-  font-size: 12px;
+  font-size: 12px; font-weight: 600; letter-spacing: .005em;
   padding: 1px 7px;
   border-radius: 999px;
-  background: #16130fdd;
+  background: #16130fcc;
+  backdrop-filter: blur(8px);
   border: 1px solid var(--line);
   color: var(--ink);
+  box-shadow: var(--shadow-1);
+  transition: border-color var(--calm), color var(--calm), transform var(--press);
+}
+.plate:hover b { border-color: #4d4437; }
+.plate:active b { transform: scale(0.94); } /* feedback on the press, not the release */
+/* Caption and chips float over the room's pixel art, so they get their own
+ * material and a vibrancy bump — flat grey text on a patterned wall is
+ * unreadable, and no amount of colour on the translucent layer fixes it. */
+.plate .cap,
+.plate .chips {
+  /* fit-content + auto margins: the backing hugs the text but each still owns
+   * its own line under the name. */
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  margin: 2px auto 0;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #16130fbf;
+  backdrop-filter: blur(6px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: top;
 }
 .plate .cap {
-  display: block;
-  font-size: 11px;
-  color: var(--ink-dim);
-  margin-top: 2px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  font-size: 11px; font-weight: 500; letter-spacing: .015em;
+  color: #ded2c0; /* one step brighter than --ink-dim: it is over content */
 }
+.plate .cap:empty, .plate .chips:empty { display: none; }
 .plate .cap.job { color: var(--accent); font-weight: 600; }
 .plate .chips {
-  display: block;
-  font-size: 10px;
-  color: var(--ink-mute);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  font-size: 10px; font-weight: 500; letter-spacing: .025em;
+  color: #a99d8c;
 }
 .plate[data-state="working"] b { border-color: #2e5f57; }
 .plate[data-state="awaiting_approval"] b { border-color: var(--bad); color: #ffd9d2; }
 .plate[data-state="exited"] { opacity: .55; }
 .plate.sel b { border-color: var(--accent); color: #fff2dc; }
+/* The card is over this person — say so on the person, not just the room. */
+.plate.drop b {
+  border-color: var(--accent);
+  background: #3a2c14ee;
+  color: #fff2dc;
+  transform: scale(1.06);
+}
 
 /* ── usage + system ────────────────────────────────────────────────────── */
 .usage .lim { margin-bottom: 9px; }
@@ -172,13 +260,18 @@ body:has(.update-bar:not([hidden])) .app { height: calc(100% - 38px); }
   font-size: 12px; margin-bottom: 3px;
 }
 .usage .top span:last-child { color: var(--ink-dim); font-variant-numeric: tabular-nums; }
-.bar { height: 5px; border-radius: 3px; background: #2c261f; overflow: hidden; }
-.bar > i { display: block; height: 100%; background: var(--ok); }
+.bar { height: 5px; border-radius: 3px; background: #2c261f; overflow: hidden; box-shadow: inset 0 1px 1px #0006; }
+.bar > i {
+  display: block; height: 100%;
+  background: var(--ok);
+  border-radius: 3px;
+  transition: width 600ms cubic-bezier(0.32, 0.72, 0, 1), background var(--calm);
+}
 .bar.warn > i { background: var(--warn); }
 .bar.bad > i { background: var(--bad); }
-.usage .resets { font-size: 11px; color: var(--ink-mute); margin-top: 2px; }
+.usage .resets { font-size: 11px; letter-spacing: .01em; color: var(--ink-mute); margin-top: 2px; }
 
-.hint-sm { margin: -3px 0 8px; font-size: 11px; color: var(--ink-mute); }
+.hint-sm { margin: -3px 0 8px; font-size: 11px; line-height: 1.45; letter-spacing: .01em; color: var(--ink-mute); }
 
 /* ── today's tasks + timer ─────────────────────────────────────────────── */
 .tasks { display: grid; gap: 5px; }
@@ -203,12 +296,35 @@ body:has(.update-bar:not([hidden])) .app { height: calc(100% - 38px); }
   padding: 7px 9px;
   cursor: grab;
   user-select: none;
+  touch-action: none; /* the card owns the gesture — see startJobDrag() */
+  transition: border-color var(--calm), transform var(--press), opacity var(--calm);
 }
-.job-card:active { cursor: grabbing; }
-.job-card:hover { border-color: var(--accent); }
-.job-card b { display: block; font-size: 12px; font-weight: 600; }
-.job-card small { color: var(--ink-mute); font-size: 11px; }
-.stage.drop-target { outline: 2px dashed var(--accent); outline-offset: -8px; border-radius: 12px; }
+.job-card:hover { border-color: #4d4437; }
+.job-card:active { cursor: grabbing; transform: scale(0.97); }
+.job-card b { display: block; font-size: 12px; font-weight: 600; letter-spacing: .005em; }
+.job-card small { color: var(--ink-mute); font-size: 11px; letter-spacing: .01em; }
+/* While its ghost is in the air the original stays put, dimmed — the card left
+ * this spot and can come back to it. */
+.job-card.lifted { opacity: .3; transform: none; }
+
+#drag-layer {
+  position: fixed; inset: 0;
+  pointer-events: none;
+  z-index: 40;
+}
+.job-ghost {
+  position: absolute; top: 0; left: 0;
+  border: 1px solid #6b5a3c;
+  background: #2c2619f2;
+  backdrop-filter: blur(10px);
+  border-radius: 10px;
+  padding: 7px 9px;
+  width: max-content; max-width: 240px;
+  box-shadow: var(--shadow-3);
+  will-change: transform;
+}
+.job-ghost b { display: block; font-size: 12px; font-weight: 600; color: var(--ink); }
+.job-ghost small { color: var(--ink-mute); font-size: 11px; }
 
 .system { display: grid; gap: 7px; }
 .system .row { display: flex; justify-content: space-between; font-size: 12px; }
@@ -219,10 +335,14 @@ body:has(.update-bar:not([hidden])) .app { height: calc(100% - 38px); }
   list-style: none; margin: 0; padding: 0;
   overflow-y: auto; flex: 1;
   font-size: 12px;
+  /* Fade where the log runs under the panel edge instead of ruling a line. */
+  mask-image: linear-gradient(#000 calc(100% - 18px), transparent);
+  scrollbar-width: thin;
+  scrollbar-color: #3a332b transparent;
 }
 .activity li {
   padding: 3px 0;
-  border-bottom: 1px solid #241f19;
+  border-bottom: 1px solid var(--line-soft);
   color: var(--ink-dim);
   display: flex; gap: 7px;
 }
@@ -240,24 +360,39 @@ body:has(.update-bar:not([hidden])) .app { height: calc(100% - 38px); }
   gap: 8px;
   padding-right: 3px;
   min-height: 0;
+  mask-image: linear-gradient(transparent, #000 14px);
+  scrollbar-width: thin;
+  scrollbar-color: #3a332b transparent;
 }
 .chat .empty { margin: auto; }
 .msg {
   padding: 7px 10px;
-  border-radius: 9px;
+  border-radius: 12px;
   max-width: 92%;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font-size: 13px;
+  font-size: 13px; line-height: 1.55; /* looser leading for prose than for the dense UI */
+  box-shadow: var(--shadow-1);
 }
-.msg.user { align-self: flex-end; background: #33301f; color: #f6ecd6; }
-.msg.assistant { align-self: flex-start; background: var(--panel-2); border: 1px solid var(--line); }
+.msg.user { align-self: flex-end; background: #33301f; color: #f6ecd6; border-bottom-right-radius: 4px; }
+.msg.assistant {
+  align-self: flex-start;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-bottom-left-radius: 4px;
+}
 .msg.assistant.streaming { border-style: dashed; }
 .msg.tool {
   align-self: flex-start;
-  background: none; border: none;
-  color: var(--ink-mute); font-size: 11px; padding: 0 2px;
+  background: none; border: none; box-shadow: none;
+  color: var(--ink-mute); font-size: 11px; letter-spacing: .01em; padding: 0 2px;
 }
+/* A new message arrives from where it belongs — the user's from the right, the
+ * assistant's from the left — and never re-animates on a re-render. */
+.msg.in { animation: msg-in 280ms cubic-bezier(0.32, 0.72, 0, 1) both; }
+.msg.user.in { animation-name: msg-in-right; }
+@keyframes msg-in { from { opacity: 0; transform: translate(-6px, 6px) scale(.98); } }
+@keyframes msg-in-right { from { opacity: 0; transform: translate(6px, 6px) scale(.98); } }
 
 .composer { display: grid; gap: 7px; }
 .composer .row { display: flex; gap: 7px; align-items: stretch; }
@@ -267,28 +402,35 @@ body:has(.update-bar:not([hidden])) .app { height: calc(100% - 38px); }
   resize: none;
   background: var(--panel-2);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 9px;
   padding: 7px 9px;
   outline: none;
+  line-height: 1.5;
+  transition: border-color var(--calm), box-shadow var(--calm);
 }
-.composer textarea:focus { border-color: #4d4437; }
+.composer textarea:focus { border-color: #6b5a3c; box-shadow: 0 0 0 3px #f0b45a1f; }
 
 button {
   background: var(--accent);
-  color: #241c0d;
+  color: var(--accent-ink);
   border: none;
   border-radius: 8px;
   padding: 7px 13px;
   font-weight: 600;
+  letter-spacing: .005em;
   cursor: pointer;
+  box-shadow: var(--shadow-1);
+  transition: transform var(--press), filter var(--press), border-color var(--calm), color var(--calm);
 }
 button:hover { filter: brightness(1.07); }
-button:disabled { opacity: .5; cursor: default; filter: none; }
+button:active { transform: scale(0.96); } /* the instant it goes down */
+button:disabled { opacity: .5; cursor: default; filter: none; transform: none; }
 button.ghost {
   background: none;
   color: var(--ink-mute);
   border: 1px solid var(--line);
   font-weight: 500;
+  box-shadow: none;
 }
 button.ghost:hover { color: var(--ink); border-color: #4d4437; }
 
@@ -298,6 +440,7 @@ button.ghost:hover { color: var(--ink); border-color: #4d4437; }
   cursor: pointer;
 }
 .watch input { accent-color: var(--accent); }
+.watch:active { color: var(--ink); }
 .toggles { display: flex; gap: 14px; flex-wrap: wrap; }
 
 /* ── approvals ─────────────────────────────────────────────────────────── */
@@ -305,17 +448,19 @@ button.ghost:hover { color: var(--ink); border-color: #4d4437; }
 .approvals-panel h2 { color: #f0a79a; }
 .approval {
   border: 1px solid var(--line);
-  border-radius: 9px;
+  border-radius: 10px;
   background: var(--panel-2);
   padding: 9px 10px;
   margin-bottom: 8px;
+  animation: approval-in 300ms cubic-bezier(0.32, 0.72, 0, 1) both;
 }
+@keyframes approval-in { from { opacity: 0; transform: translateY(-6px) scale(.98); } }
 .approval:last-child { margin-bottom: 0; }
-.approval .who { font-size: 11px; color: var(--ink-mute); }
-.approval .what { font-size: 13px; margin: 2px 0 5px; overflow-wrap: anywhere; }
+.approval .who { font-size: 11px; letter-spacing: .01em; color: var(--ink-mute); }
+.approval .what { font-size: 13px; line-height: 1.5; margin: 2px 0 5px; overflow-wrap: anywhere; }
 .approval pre {
   margin: 0 0 7px;
-  font-size: 11px;
+  font: 11px/1.55 var(--mono);
   color: var(--ink-dim);
   background: #1a1713;
   border-radius: 6px;
@@ -329,24 +474,36 @@ button.ghost:hover { color: var(--ink); border-color: #4d4437; }
 .approval .acts button { padding: 4px 11px; font-size: 12px; }
 .approval .acts .deny { background: #6d3a31; color: #ffd9d2; }
 
-/* ── hire sheet ────────────────────────────────────────────────────────── */
+/* ── sheets ────────────────────────────────────────────────────────────── */
+/* A modal task dims the room and pushes it back; the sheet materialises —
+ * blur and scale together — rather than fading in flat. openSheet() in main.js
+ * drives --enter from a spring. */
 .modal {
   position: fixed; inset: 0;
-  background: #0c0a08cc;
   display: grid; place-items: center;
   z-index: 20;
+  --enter: 1;
+  background: rgba(12, 10, 8, calc(0.72 * var(--enter)));
+  backdrop-filter: blur(calc(14px * var(--enter))) saturate(120%);
 }
 .modal[hidden] { display: none; }
 .sheet {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 14px;
+  background: #211e1af2;
+  backdrop-filter: blur(30px) saturate(180%);
+  border: 1px solid #ffffff1a;
+  border-radius: 16px;
   padding: 18px;
   width: min(460px, 92vw);
   display: grid; gap: 14px;
+  box-shadow: var(--shadow-3);
+  /* Anchored to whatever opened it, so the sheet grows out of its trigger. */
+  transform-origin: var(--origin-x, 50%) var(--origin-y, 50%);
+  transform: scale(calc(0.94 + 0.06 * var(--enter)));
+  opacity: var(--enter);
+  will-change: transform;
 }
-.sheet h3 { margin: 0; font-size: 15px; }
-.sheet-actions { display: flex; justify-content: flex-end; }
+.sheet h3 { margin: 0; font-size: 16px; font-weight: 650; letter-spacing: -.01em; }
+.sheet-actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
 
 .persona-list { display: grid; gap: 8px; }
 .persona {
@@ -357,19 +514,21 @@ button.ghost:hover { color: var(--ink); border-color: #4d4437; }
   text-align: left;
   background: var(--panel-2);
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 12px;
   padding: 10px 12px;
   color: var(--ink);
   font-weight: 500;
   cursor: pointer;
+  box-shadow: none;
 }
 .persona:hover { border-color: var(--accent); filter: none; }
+.persona:active { transform: scale(0.985); }
 .persona canvas { image-rendering: pixelated; }
-.persona b { display: block; font-size: 13px; }
-.persona small { color: var(--ink-mute); font-size: 11px; }
+.persona b { display: block; font-size: 13px; letter-spacing: .005em; }
+.persona small { color: var(--ink-mute); font-size: 11px; letter-spacing: .01em; }
 
 /* ── type + skill editor ───────────────────────────────────────────────── */
-button.tiny { padding: 3px 9px; font-size: 11px; }
+button.tiny { padding: 3px 9px; font-size: 11px; letter-spacing: .01em; }
 .file-btn { cursor: pointer; display: inline-flex; align-items: center; }
 
 .attachments { display: flex; flex-wrap: wrap; gap: 5px; }
@@ -378,7 +537,10 @@ button.tiny { padding: 3px 9px; font-size: 11px; }
   font-size: 11px; color: var(--ink-dim);
   background: var(--panel-2); border: 1px solid var(--line);
   border-radius: 999px; padding: 2px 9px;
+  transition: transform var(--press), border-color var(--calm);
 }
+.attachments .chip:active { transform: scale(0.94); }
+.attachments .chip:hover { border-color: #4d4437; }
 
 .sheet.wide { width: min(880px, 94vw); }
 .types-body { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 14px; }
@@ -386,29 +548,61 @@ button.tiny { padding: 3px 9px; font-size: 11px; }
 .type-tabs button {
   background: none; border: 1px solid var(--line); color: var(--ink-dim);
   text-align: left; font-weight: 500; padding: 7px 10px;
+  box-shadow: none;
 }
 .type-tabs button.on { border-color: var(--accent); color: var(--ink); background: var(--panel-2); }
 
 .type-editor { display: grid; gap: 10px; min-width: 0; }
 .field { display: grid; gap: 5px; }
-.field > span { font-size: 11px; color: var(--ink-mute); }
+.field > span { font-size: 11px; letter-spacing: .02em; color: var(--ink-mute); }
 .type-editor textarea {
   width: 100%;
   background: #16130f;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 9px;
   padding: 9px 11px;
   color: var(--ink);
-  font: 12px/1.6 "Cascadia Mono", Consolas, ui-monospace, monospace;
+  font: 12px/1.6 var(--mono);
   resize: vertical;
   outline: none;
+  transition: border-color var(--calm), box-shadow var(--calm);
 }
-.type-editor textarea:focus { border-color: #4d4437; }
+.type-editor textarea:focus { border-color: #6b5a3c; box-shadow: 0 0 0 3px #f0b45a1f; }
 .skills-head { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--ink-mute); }
 .skills-head select {
   flex: 1;
   background: var(--panel-2); border: 1px solid var(--line);
   border-radius: 7px; padding: 4px 8px; font-size: 12px; outline: none;
 }
-.sheet-actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
 .saved { margin-right: auto; font-size: 12px; color: var(--ok); }
+
+/* ── accessibility answers ─────────────────────────────────────────────── */
+/* Reduced motion keeps the feedback and drops the travel. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 120ms !important;
+  }
+  button:active, .plate:active b, .job-card:active, .persona:active,
+  .attachments .chip:active { transform: none; }
+  .msg.in, .approval { animation: fade-in 160ms ease both; }
+  @keyframes fade-in { from { opacity: 0; } }
+}
+
+/* Frostier, not see-through, when the user has asked for less transparency. */
+@media (prefers-reduced-transparency: reduce) {
+  .update-bar { background: #2e2716; backdrop-filter: none; }
+  .hint { background: var(--panel); backdrop-filter: none; }
+  .plate b { background: #16130f; backdrop-filter: none; }
+  .modal { background: #0c0a08f2; backdrop-filter: none; }
+  .sheet, .job-ghost { background: var(--panel); backdrop-filter: none; }
+}
+
+@media (prefers-contrast: more) {
+  :root { --ink-mute: #b4a894; --ink-dim: #ddd2c2; --line: #574d40; }
+  .panel, .sheet, .approval, .job-card, .persona { border-color: var(--line); }
+  .modal { background: #07060560; }
+  .sheet { background: var(--panel); backdrop-filter: none; }
+  .activity li { border-bottom-color: #3d362d; }
+}

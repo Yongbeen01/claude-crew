@@ -49,6 +49,9 @@ export class Office {
     this.scale = 3;
     this.hitboxes = [];
     this.hoverSeat = null;
+    /** Seat under a held-down pointer. Feedback belongs on the press, not the
+     *  release, so this is drawn immediately and the click still commits. */
+    this.pressSeat = null;
     this.selectedId = null;
     this.plates = new Map();
     this.pat = { id: null, count: 0, lastDir: 0, until: 0, ruffleUntil: 0 };
@@ -58,6 +61,14 @@ export class Office {
     canvas.addEventListener('mousemove', (e) => this._onMove(e));
     canvas.addEventListener('mouseleave', () => { this.hoverSeat = null; });
     canvas.addEventListener('click', (e) => this._onClick(e));
+    canvas.addEventListener('pointerdown', (e) => {
+      this.pressSeat = this._hit(this._toBuffer(e))?.seat ?? null;
+    });
+    // Releasing anywhere clears it — including a drag away, which is how a tap
+    // is cancelled.
+    for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) {
+      canvas.addEventListener(ev, () => { this.pressSeat = null; });
+    }
   }
 
   setState(state) {
@@ -159,6 +170,12 @@ export class Office {
 
       this._drawPerson(ctx, person, a, now);
       this.hitboxes.push({ seat, person, x: a.x, y: a.y, w: CELL_W, h: CELL_H });
+    }
+
+    // Press highlight, drawn last so it sits over whoever is in the seat.
+    if (this.pressSeat !== null) {
+      const a = this._seatAnchor(this.pressSeat, layout);
+      px(ctx, a.x + 6, a.y + RUG_TOP, CELL_W - 12, RUG_H, '#ffffff14');
     }
 
     // blit
@@ -333,8 +350,10 @@ export class Office {
 
   _onClick(e) {
     const hit = this._hit(this._toBuffer(e));
+    this.pressSeat = null;
     if (!hit) return;
     if (hit.person) this.onPersonClick(hit.person.id);
-    else this.onSeatClick(hit.seat);
+    // The sheet grows out of the desk that was clicked, so pass where it was.
+    else this.onSeatClick(hit.seat, { x: e.clientX, y: e.clientY });
   }
 }

@@ -7,7 +7,7 @@
 <link rel="stylesheet" href="/css/app.css">
 </head>
 <body>
-<div id="update-bar" class="update-bar" hidden>
+<div id="update-bar" class="update-bar" hidden role="status">
   <span id="update-text"></span>
   <button type="button" id="update-apply" class="tiny">받기</button>
   <button type="button" id="update-hide" class="ghost tiny">나중에</button>
@@ -61,7 +61,7 @@
         <div id="nameplates"></div>
       </div>
     </div>
-    <div class="hint" id="hint">빈 책상을 누르면 사람을 부릅니다.</div>
+    <div class="hint" id="hint" role="status">빈 책상을 누르면 사람을 부릅니다.</div>
   </main>
 
   <aside class="col right">
@@ -104,10 +104,13 @@
 
 </div>
 
+<!-- 끌고 있는 일 카드는 손끝을 그대로 따라다닙니다 (main.js startJobDrag) -->
+<div id="drag-layer" aria-hidden="true"></div>
+
 <!-- 유형 고르기 -->
 <div id="hire" class="modal" hidden>
-  <div class="sheet">
-    <h3>누구를 부를까요?</h3>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="hire-title">
+    <h3 id="hire-title">누구를 부를까요?</h3>
     <div id="persona-list" class="persona-list"></div>
     <label class="watch">
       <input type="checkbox" id="hire-watch">
@@ -121,8 +124,8 @@
 
 <!-- 유형·스킬 편집 -->
 <div id="types" class="modal" hidden>
-  <div class="sheet wide">
-    <h3>유형과 스킬</h3>
+  <div class="sheet wide" role="dialog" aria-modal="true" aria-labelledby="types-title">
+    <h3 id="types-title">유형과 스킬</h3>
     <p class="hint-sm">여기서 고친 내용은 <b>다음에 부르는 사람부터</b> 적용됩니다.</p>
     <div class="types-body">
       <nav id="type-tabs" class="type-tabs"></nav>

@@ -1,5 +1,6 @@
 import { Office } from './office.js';
 import { avatarOf, character } from './sprites.js';
+import { spring, spring2d, project, VelocityTracker } from './motion.js';
 
 /**
  * Store + SSE wiring + render loop.
@@ -71,12 +72,13 @@ const el = {
   updateText: document.getElementById('update-text'),
   updateApply: document.getElementById('update-apply'),
   updateHide: document.getElementById('update-hide'),
+  dragLayer: document.getElementById('drag-layer'),
 };
 
 const office = new Office(el.office, el.plates);
 window.__office = office;
 
-office.onSeatClick = () => openHire();
+office.onSeatClick = (seat, at) => openHire(at);
 office.onPersonClick = (id) => select(id);
 
 // ── api ──────────────────────────────────────────────────────────────────
@@ -127,9 +129,12 @@ function connect() {
   es.addEventListener('message', (e) => {
     const m = JSON.parse(e.data);
     // The full message supersedes whatever we accumulated while it streamed.
+    // A bubble that was already on screen streaming must not re-enter as if it
+    // were new — it just stops being dashed.
+    const wasStreaming = store.streaming.has(m.personId);
     if (m.role === 'assistant') store.streaming.delete(m.personId);
     const list = store.chats.get(m.personId) ?? [];
-    list.push({ role: m.role, text: m.text, at: m.at });
+    list.push({ role: m.role, text: m.text, at: m.at, settled: m.role === 'assistant' && wasStreaming });
     store.chats.set(m.personId, list.slice(-200));
     if (m.personId === store.selectedId) renderChat();
   });
@@ -178,8 +183,15 @@ function renderChat() {
   const streaming = store.streaming.get(person.id);
 
   const atBottom = el.chat.scrollHeight - el.chat.scrollTop - el.chat.clientHeight < 60;
+  // Only what is genuinely new animates in; a re-render must never replay the
+  // whole conversation.
+  const shown = shownCount.get(person.id);
+  shownCount.set(person.id, msgs.length);
   el.chat.innerHTML = '';
-  for (const m of msgs) el.chat.appendChild(bubbleEl(m.role, m.text));
+  msgs.forEach((m, i) => {
+    const fresh = shown !== undefined && i >= shown && !m.settled;
+    el.chat.appendChild(bubbleEl(m.role, m.text, false, fresh));
+  });
   if (streaming) el.chat.appendChild(bubbleEl('assistant', streaming, true));
   if (!msgs.length && !streaming) {
     el.chat.innerHTML = '<p class="muted empty">아직 대화가 없습니다.</p>';
@@ -187,9 +199,12 @@ function renderChat() {
   if (atBottom) el.chat.scrollTop = el.chat.scrollHeight;
 }
 
-function bubbleEl(role, text, streaming = false) {
+/** personId -> how many messages were already on screen last render */
+const shownCount = new Map();
+
+function bubbleEl(role, text, streaming = false, fresh = false) {
   const d = document.createElement('div');
-  d.className = `msg ${role}${streaming ? ' streaming' : ''}`;
+  d.className = `msg ${role}${streaming ? ' streaming' : ''}${fresh ? ' in' : ''}`;
   d.textContent = text;
   return d;
 }
@@ -231,13 +246,73 @@ el.dismiss.addEventListener('click', async () => {
   if (!person) return;
   await api(`/api/crew/${person.id}`, { method: 'DELETE' });
   store.chats.delete(person.id);
+  shownCount.delete(person.id);
   store.selectedId = null;
   office.selectedId = null;
   renderChat();
 });
 
+// ── sheets ───────────────────────────────────────────────────────────────
+/**
+ * A sheet grows out of whatever opened it and shrinks back the same way, so the
+ * relationship between the trigger and the panel is never in doubt. One spring
+ * drives scrim opacity, backdrop blur and the sheet's scale together (the CSS
+ * reads `--enter`), which makes the glass arrive as a material instead of a
+ * flat fade. Re-opening mid-close is fine — the spring is retargeted, not
+ * replaced, so it carries its velocity through the reversal.
+ */
+const sheets = new Map();
+
+function openSheet(modal, origin) {
+  const sheet = modal.querySelector('.sheet');
+  const wasOpen = !modal.hidden;
+  modal.hidden = false;
+  if (!wasOpen) modal.style.setProperty('--enter', '0');
+
+  if (origin) {
+    const r = sheet.getBoundingClientRect();
+    const clamp = (n) => Math.max(-20, Math.min(120, n));
+    sheet.style.setProperty('--origin-x', `${clamp(((origin.x - r.left) / r.width) * 100)}%`);
+    sheet.style.setProperty('--origin-y', `${clamp(((origin.y - r.top) / r.height) * 100)}%`);
+  } else {
+    sheet.style.removeProperty('--origin-x');
+    sheet.style.removeProperty('--origin-y');
+  }
+
+  const cur = sheets.get(modal);
+  const from = Number(getComputedStyle(modal).getPropertyValue('--enter')) || 0;
+  if (cur) { cur.retarget(1); return; }
+  sheets.set(modal, spring({
+    from, to: 1, duration: 0.34, bounce: 0, epsilon: 0.004,
+    onUpdate: (v) => modal.style.setProperty('--enter', String(v)),
+    onDone: () => sheets.delete(modal),
+  }));
+  // Focus the sheet itself, not the first control: the eye should land on the
+  // heading, and Esc has to work from anywhere inside.
+  sheet.setAttribute('tabindex', '-1');
+  sheet.focus({ preventScroll: true });
+}
+
+function closeSheet(modal) {
+  if (modal.hidden) return;
+  sheets.get(modal)?.stop();
+  const from = Number(getComputedStyle(modal).getPropertyValue('--enter')) || 1;
+  sheets.set(modal, spring({
+    from, to: 0, duration: 0.28, bounce: 0, epsilon: 0.004,
+    onUpdate: (v) => modal.style.setProperty('--enter', String(v)),
+    onDone: () => { sheets.delete(modal); modal.hidden = true; },
+  }));
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  for (const modal of [el.types, el.hire]) {
+    if (!modal.hidden) { closeSheet(modal); break; } // topmost only — never trap
+  }
+});
+
 // ── hire sheet ───────────────────────────────────────────────────────────
-function openHire() {
+function openHire(origin) {
   el.personaList.innerHTML = '';
   for (const p of store.personas) {
     const btn = document.createElement('button');
@@ -269,11 +344,11 @@ function openHire() {
     btn.addEventListener('click', () => hire(p.key));
     el.personaList.appendChild(btn);
   }
-  el.hire.hidden = false;
+  openSheet(el.hire, origin);
 }
 
 async function hire(personaKey) {
-  el.hire.hidden = true;
+  closeSheet(el.hire);
   const r = await api('/api/crew', {
     method: 'POST',
     body: { personaKey, watch: el.hireWatch.checked },
@@ -282,8 +357,8 @@ async function hire(personaKey) {
   else if (r.error) alert(r.error);
 }
 
-el.hireCancel.addEventListener('click', () => { el.hire.hidden = true; });
-el.hire.addEventListener('click', (e) => { if (e.target === el.hire) el.hire.hidden = true; });
+el.hireCancel.addEventListener('click', () => closeSheet(el.hire));
+el.hire.addEventListener('click', (e) => { if (e.target === el.hire) closeSheet(el.hire); });
 
 function hash(str) {
   let h = 0x811c9dc5;
@@ -338,12 +413,15 @@ async function uploadPending(personId) {
 // ── type + skill editor ──────────────────────────────────────────────────
 const editor = { key: null, persona: null, skill: null, dirty: new Map() };
 
-el.openTypes.addEventListener('click', () => openTypes());
-el.typesClose.addEventListener('click', () => { el.types.hidden = true; });
-el.types.addEventListener('click', (e) => { if (e.target === el.types) el.types.hidden = true; });
+el.openTypes.addEventListener('click', (e) => {
+  const r = e.currentTarget.getBoundingClientRect();
+  openTypes({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+});
+el.typesClose.addEventListener('click', () => closeSheet(el.types));
+el.types.addEventListener('click', (e) => { if (e.target === el.types) closeSheet(el.types); });
 
-async function openTypes() {
-  el.types.hidden = false;
+async function openTypes(origin) {
+  openSheet(el.types, origin);
   el.typeSaved.textContent = '';
   el.typeTabs.innerHTML = '';
   for (const p of store.personas) {
@@ -515,37 +593,158 @@ function renderJobs() {
   for (const j of list) {
     const card = document.createElement('div');
     card.className = 'job-card';
-    card.draggable = true;
     card.innerHTML = '<b></b><small></small>';
     card.querySelector('b').textContent = j.name;
     card.querySelector('small').textContent =
       `${j.runCount}회${j.avgMinutes ? ` · 보통 ${j.avgMinutes}분` : ''}`;
-    card.addEventListener('dragstart', (e) => {
-      e.dataTransfer.setData('text/plain', j.name);
-      e.dataTransfer.effectAllowed = 'copy';
-      el.stage.classList.add('drop-target');
-    });
-    card.addEventListener('dragend', () => el.stage.classList.remove('drop-target'));
+    card.addEventListener('pointerdown', (e) => startJobDrag(card, j, e));
     el.jobs.appendChild(card);
   }
 }
 
-// Dropping a card on someone hands them the job plus everything the office has
-// learned about it — that is the whole point of the card.
-el.stage.addEventListener('dragover', (e) => {
-  e.preventDefault();
-  e.dataTransfer.dropEffect = 'copy';
-});
-el.stage.addEventListener('drop', async (e) => {
-  e.preventDefault();
-  el.stage.classList.remove('drop-target');
-  const jobName = e.dataTransfer.getData('text/plain');
-  if (!jobName) return;
-  const hit = office.hitAtClient(e.clientX, e.clientY);
-  if (!hit?.person) return;
-  await api(`/api/crew/${hit.person.id}/job`, { method: 'POST', body: { jobName } });
-  select(hit.person.id);
-});
+/**
+ * Handing a job to someone is a physical act, so it is a pointer gesture rather
+ * than HTML5 drag-and-drop — that API reports a drop and nothing in between,
+ * which is exactly the continuous feedback this needs.
+ *
+ * The card leaves a dimmed copy of itself behind, the one in the air stays glued
+ * to the point you grabbed it by, leans into the direction it is moving, and on
+ * release either lands on the person (its momentum projected, so a flick counts)
+ * or springs home carrying the velocity your hand gave it.
+ */
+function startJobDrag(card, job, down) {
+  if (down.button !== 0) return;
+  const origin = card.getBoundingClientRect();
+  const grab = { x: down.clientX - origin.left, y: down.clientY - origin.top };
+  const track = new VelocityTracker();
+  track.add(down.clientX, down.clientY);
+
+  let ghost = null;
+  let pos = { x: origin.left, y: origin.top };
+  let tilt = 0;
+  let hovered = null;
+  card.setPointerCapture(down.pointerId);
+
+  const paint = (scale = 1.04) => {
+    ghost.style.transform =
+      `translate3d(${pos.x}px, ${pos.y}px, 0) rotate(${tilt.toFixed(2)}deg) scale(${scale})`;
+  };
+
+  const lift = () => {
+    ghost = document.createElement('div');
+    ghost.className = 'job-ghost';
+    ghost.innerHTML = '<b></b><small></small>';
+    ghost.querySelector('b').textContent = job.name;
+    ghost.querySelector('small').textContent = card.querySelector('small').textContent;
+    ghost.style.minWidth = `${origin.width}px`;
+    el.dragLayer.appendChild(ghost);
+    card.classList.add('lifted');
+    el.stage.classList.add('drop-target');
+    paint();
+  };
+
+  const setHover = (person) => {
+    if (hovered === person?.id) return;
+    if (hovered) office.plates.get(hovered)?.classList.remove('drop');
+    hovered = person?.id ?? null;
+    if (hovered) office.plates.get(hovered)?.classList.add('drop');
+  };
+
+  const onMove = (e) => {
+    track.add(e.clientX, e.clientY);
+    if (!ghost) {
+      // ~8px of hysteresis: a press that never really moved is not a drag.
+      if (Math.hypot(e.clientX - down.clientX, e.clientY - down.clientY) < 8) return;
+      lift();
+    }
+    pos = { x: e.clientX - grab.x, y: e.clientY - grab.y }; // keeps the grab offset
+    // Lean toward where it is going — the in-between frames should tell you
+    // where this is headed.
+    const want = Math.max(-6, Math.min(6, track.get().x / 130));
+    tilt += (want - tilt) * 0.25;
+    paint();
+    setHover(office.hitAtClient(e.clientX, e.clientY)?.person ?? null);
+  };
+
+  const onUp = (e) => {
+    card.removeEventListener('pointermove', onMove);
+    card.removeEventListener('pointerup', onUp);
+    card.removeEventListener('pointercancel', onUp);
+    el.stage.classList.remove('drop-target');
+    if (!ghost) return; // a tap, not a throw
+
+    const v = track.get();
+    // Where the card would come to rest if you let it slide — a flick toward
+    // someone counts as handing it to them. 0.99 rather than the scroll-view
+    // 0.998: across a few hundred pixels the slower rate throws the card most
+    // of the way across the screen, which is not what the hand meant.
+    const landing = { x: e.clientX + project(v.x, 0.99), y: e.clientY + project(v.y, 0.99) };
+    const hit = office.hitAtClient(e.clientX, e.clientY)?.person
+      ? office.hitAtClient(e.clientX, e.clientY)
+      : office.hitAtClient(landing.x, landing.y);
+    setHover(null);
+
+    if (hit?.person) handOff(hit, v);
+    else springHome(v);
+  };
+
+  // The work starts the moment you let go; the animation is only how it looks.
+  function handOff(hit, v) {
+    const person = hit.person;
+    api(`/api/crew/${person.id}/job`, { method: 'POST', body: { jobName: job.name } });
+    select(person.id);
+
+    const r = office.canvas.getBoundingClientRect();
+    const target = {
+      x: r.left + (hit.x + hit.w / 2) * office.scale - ghost.offsetWidth / 2,
+      y: r.top + (hit.y + hit.h / 2) * office.scale - ghost.offsetHeight / 2,
+    };
+    let shrink = 1.04;
+    spring({
+      from: 1.04, to: 0.6, duration: 0.32, bounce: 0,
+      onUpdate: (s) => { shrink = s; },
+    });
+    ghost.style.transition = 'opacity 260ms ease-out';
+    ghost.style.opacity = '0';
+    spring2d({
+      from: pos, to: target, velocity: v, duration: 0.4, bounce: 0, // a move: no overshoot
+      onUpdate: (p) => { pos = p; tilt *= 0.9; paint(shrink); },
+      onDone: cleanup,
+    });
+  }
+
+  function springHome(v) {
+    // The list can re-render mid-drag (a job finishes, the card is replaced).
+    // With nowhere to land, the ghost fades out where it is rather than
+    // springing to the top-left corner of the screen.
+    if (!card.isConnected) {
+      ghost.style.transition = 'opacity 200ms ease-out';
+      ghost.style.opacity = '0';
+      setTimeout(cleanup, 220);
+      return;
+    }
+    const home = card.getBoundingClientRect(); // re-measured: the list may have moved
+    let scale = 1.04;
+    spring({ from: 1.04, to: 1, duration: 0.4, bounce: 0.2, onUpdate: (s) => { scale = s; } });
+    spring2d({
+      // Bounce, because your hand put momentum into it — a card that just
+      // faded in would have no business overshooting.
+      from: pos, to: { x: home.left, y: home.top }, velocity: v, duration: 0.4, bounce: 0.2,
+      onUpdate: (p) => { pos = p; tilt *= 0.88; paint(scale); },
+      onDone: cleanup,
+    });
+  }
+
+  function cleanup() {
+    ghost?.remove();
+    ghost = null;
+    card.classList.remove('lifted');
+  }
+
+  card.addEventListener('pointermove', onMove);
+  card.addEventListener('pointerup', onUp);
+  card.addEventListener('pointercancel', onUp);
+}
 
 function renderSystem() {
   const s = store.system;
@@ -608,6 +807,7 @@ function renderAll() {
   renderJobs();
   renderChat();
 }
+window.__render = renderAll; // handy for the Playwright checks
 
 // ── loop ─────────────────────────────────────────────────────────────────
 let last = 0;
