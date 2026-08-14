@@ -21,7 +21,10 @@ irm https://raw.githubusercontent.com/Yongbeen01/claude-crew/main/scripts/instal
 Node 와 Claude Code 가 없으면 알아서 설치하고, 바탕화면 바로가기를 만들고, Claude 로그인까지
 안내한 뒤 실행합니다. 다음부터는 **바탕화면의 claude-crew 아이콘**으로 열면 됩니다.
 
-필요한 것: Windows 10/11, 그리고 **Claude 유료 구독**(Pro / Max / Team).
+필요한 것은 Windows 10/11 과 **Claude 유료 구독**(Pro / Max / Team) 뿐입니다.
+
+**GitHub 계정은 필요 없습니다.** 설치도 업데이트도 로그인 없이 받아 갑니다. Node, git,
+Claude Code 도 없으면 설치 과정에서 알아서 챙깁니다.
 
 ### 업데이트
 
