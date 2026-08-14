@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>claude-crew</title>
+<!-- Drawn inline: nothing to fetch, and nothing for the browser to 404 on when
+     it asks for /favicon.ico by itself. Someone at a desk. -->
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%23201d19'/><circle cx='16' cy='12' r='4.5' fill='%23efe7db'/><rect x='5' y='19' width='22' height='4' rx='1.5' fill='%23f0b45a'/></svg>">
 <link rel="stylesheet" href="/css/app.css">
 </head>
 <body>
@@ -32,6 +35,7 @@
 
     <section class="panel" id="today-panel" hidden>
       <h2>오늘</h2>
+      <p class="hint-sm">할 일을 오른쪽 구역에 끌어다 놓으면 그 이름의 창 그룹이 됩니다.</p>
       <div id="tasks" class="tasks"></div>
     </section>
 
@@ -39,6 +43,16 @@
       <h2>자주 하는 일</h2>
       <p class="hint-sm">카드를 사람에게 끌어다 놓으면 설명 없이 그 일을 시작합니다.</p>
       <div id="jobs" class="jobs"></div>
+    </section>
+
+    <section class="panel" id="windows-panel" hidden>
+      <h2>내 창</h2>
+      <p class="hint-sm">한 가지 일에 쓰는 창들을 한 테이블에 모아 두면, 그 일을 시작할 때
+        한 번에 열고 끝나면 한 번에 치울 수 있습니다. 사람을 끌어다 옮기세요.</p>
+      <div id="windows-summary" class="system"></div>
+      <div class="row end">
+        <button type="button" id="group-new" class="ghost tiny">새 그룹</button>
+      </div>
     </section>
 
     <section class="panel">
@@ -63,6 +77,10 @@
     </div>
     <div class="hint" id="hint" role="status">빈 책상을 누르면 사람을 부릅니다.</div>
   </main>
+
+  <!-- 대화창 너비 조절 손잡이 (좌우 드래그 · 방향키 · 더블클릭으로 되돌리기) -->
+  <div id="chat-resize" class="resizer" role="separator" aria-orientation="vertical"
+       aria-label="대화창 너비" tabindex="0" title="끌어서 대화창 너비 조절 · 더블클릭하면 원래대로"></div>
 
   <aside class="col right">
     <section class="panel approvals-panel" id="approvals-panel" hidden>
@@ -104,8 +122,21 @@
 
 </div>
 
-<!-- 끌고 있는 일 카드는 손끝을 그대로 따라다닙니다 (main.js startJobDrag) -->
+<!-- 끌고 있는 카드는 손끝을 그대로 따라다닙니다 (main.js startCardDrag) -->
 <div id="drag-layer" aria-hidden="true"></div>
+
+<!-- 문 앞에서 손을 놓았을 때 -->
+<div id="leave" class="modal" hidden>
+  <div class="sheet narrow" role="dialog" aria-modal="true" aria-labelledby="leave-title">
+    <h3 id="leave-title">이 세션을 정말 종료하시나요?</h3>
+    <p class="leave-note">나간 사람은 다시 돌아오지 않아요.</p>
+    <p class="hint-sm" id="leave-who"></p>
+    <div class="sheet-actions">
+      <button type="button" id="leave-no" class="ghost">아니요</button>
+      <button type="button" id="leave-yes">예</button>
+    </div>
+  </div>
+</div>
 
 <!-- 유형 고르기 -->
 <div id="hire" class="modal" hidden>

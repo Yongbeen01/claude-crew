@@ -255,6 +255,137 @@ export function desk(ctx, cx, cy, { screen = '#1b2430', accent = '#7fd1c0', scan
   }
 }
 
+/**
+ * The way out, cut into the right-hand wall.
+ *
+ * Seen from above like everything else: the frame is the wall's thickness, the
+ * leaf has swung outward, and the mat on the floor is what makes it read as a
+ * threshold rather than a hole. The lamp over it is the only green in the room.
+ */
+export function door(ctx, x, y, h, wall, { hover = false } = {}) {
+  const FRAME = '#8a6a48';
+  const DARK = '#191510';
+
+  // the opening itself — the room's wall stops here
+  px(ctx, x, y, wall, h, DARK);
+  px(ctx, x - 1, y - 4, wall + 1, 4, FRAME);
+  px(ctx, x - 1, y + h, wall + 1, 4, FRAME);
+  px(ctx, x - 1, y - 4, 1, h + 8, darken(FRAME, 0.3));
+
+  // the leaf, swung out into the dark
+  px(ctx, x + wall, y + 2, 3, h - 8, '#8a6a48');
+  px(ctx, x + wall, y + 2, 3, 2, '#a9825a');
+  px(ctx, x + wall + 1, y + h - 12, 1, 3, '#e8d7bd'); // handle
+
+  // The daylight on the floor is what makes this read as a way out rather than
+  // a dark panel. It brightens when someone is being carried toward it.
+  ctx.save();
+  ctx.globalAlpha = hover ? 0.5 : 0.24;
+  for (let i = 0; i < 18; i += 1) {
+    const inset = Math.round(i * 0.35);
+    px(ctx, x - 18 + i, y + 2 + inset, 1, h - 4 - inset * 2, '#f6e3b8');
+  }
+  ctx.restore();
+
+  // threshold mat
+  px(ctx, x - 8, y + 3, 8, h - 6, hover ? '#6a5a3a' : '#4a4132');
+  px(ctx, x - 8, y + 3, 1, h - 6, hover ? '#f0b45a' : '#5f5646');
+
+  // EXIT lamp over the frame, and its glow on the wall
+  px(ctx, x - 12, y - 13, 12, 7, '#1d2a1c');
+  px(ctx, x - 11, y - 12, 10, 5, hover ? '#a6f0bd' : '#5fd39a');
+  px(ctx, x - 9, y - 11, 2, 3, '#1d2a1c');
+  px(ctx, x - 6, y - 11, 2, 3, '#1d2a1c');
+}
+
+/**
+ * A cardboard box. (cx, cy) is the middle of its bottom edge.
+ * `grow` 0..1 packs it as it appears; the size caps are how a box being filled
+ * on a desk and a box being carried out can be the same drawing.
+ */
+export function box(ctx, cx, cy, grow = 1, maxW = 16, maxH = 12) {
+  const g = Math.max(0, Math.min(1, grow));
+  if (g <= 0.02) return;
+  const w = Math.max(3, Math.round((maxW - 2) * g) + 2);
+  const h = Math.max(3, Math.round((maxH - 2) * g) + 2);
+  const x = Math.round(cx - w / 2);
+  const y = cy - h;
+  px(ctx, x, y, w, h, '#b98a58');
+  px(ctx, x, y, w, 2, '#cf9f6a');
+  px(ctx, x + 1, y + 2, w - 2, 1, '#8a5f3a');
+  // packing tape down the middle
+  px(ctx, cx - 1, y, 2, h, '#e0cba4');
+  px(ctx, x, y + h - 1, w, 1, '#7a5230');
+}
+
+/**
+ * The round table a group of windows sits at.
+ *
+ * A flat filled ellipse reads as a rock, so the top third is lifted, the front
+ * edge is dropped, and the whole thing gets a one-pixel rim — that outline is
+ * what makes it a piece of furniture rather than a stain on the floor.
+ */
+export function roundTable(ctx, cx, cy, r, color = '#8a6f5a') {
+  shadow(ctx, cx, cy + r - 2, r * 2 - 2, 6);
+  const rim = darken(color, 0.45);
+  for (let dy = -r; dy <= r; dy += 1) {
+    const half = Math.round(Math.sqrt(Math.max(0, r * r - dy * dy)));
+    if (!half) continue;
+    const tone = dy < -r * 0.3
+      ? lighten(color, 0.14)
+      : dy > r * 0.55 ? darken(color, 0.24) : color;
+    px(ctx, cx - half, cy + dy, half * 2, 1, tone);
+    px(ctx, cx - half, cy + dy, 1, 1, rim);
+    px(ctx, cx + half - 1, cy + dy, 1, 1, rim);
+  }
+  px(ctx, cx - Math.round(r * 0.7), cy - r, Math.round(r * 1.4), 1, rim);
+  px(ctx, cx - Math.round(r * 0.7), cy + r, Math.round(r * 1.4), 1, rim);
+  // a couple of papers and a mug, so the table reads as in use
+  px(ctx, cx - 5, cy - 3, 7, 5, '#f2eee2');
+  px(ctx, cx - 4, cy - 1, 5, 1, '#b9b3a4');
+  px(ctx, cx + 3, cy - 1, 4, 4, '#e0705b');
+}
+
+/**
+ * The floor of a zone.
+ *
+ * A tint alone disappears into the wood grain, so this lays down a flat carpet
+ * first and tints that — the two zones then read as two different floors rather
+ * than as two slightly different browns. The corner ticks are what say "this
+ * area is bounded" without drawing a box around it.
+ */
+export function zoneFloor(ctx, x, y, w, h, tint) {
+  ctx.save();
+  ctx.globalAlpha = 0.34;
+  px(ctx, x, y, w, h, '#2a2018');
+  ctx.restore();
+  ctx.save();
+  ctx.globalAlpha = 0.2;
+  px(ctx, x, y, w, h, tint);
+  ctx.restore();
+  ctx.save();
+  ctx.globalAlpha = 0.08;
+  for (let i = 4; i < h; i += 8) px(ctx, x, y + i, w, 1, '#000000');
+  ctx.restore();
+  ctx.save();
+  ctx.globalAlpha = 0.45;
+  for (const [cx, cy, dx, dy] of [
+    [x, y, 1, 1], [x + w - 1, y, -1, 1], [x, y + h - 1, 1, -1], [x + w - 1, y + h - 1, -1, -1],
+  ]) {
+    px(ctx, dx > 0 ? cx : cx - 9, cy, 10, 1, tint);
+    px(ctx, cx, dy > 0 ? cy : cy - 9, 1, 10, tint);
+  }
+  ctx.restore();
+}
+
+/** Waist-high partition between the two zones. */
+export function partition(ctx, x, y, h) {
+  px(ctx, x, y, 4, h, '#cfc4b3');
+  px(ctx, x, y, 4, 2, '#e7dfd2');
+  px(ctx, x, y + h - 2, 4, 2, '#8d7a63');
+  for (let i = 6; i < h - 6; i += 12) px(ctx, x + 1, y + i, 2, 5, '#b6a894');
+}
+
 // ── headpieces ──────────────────────────────────────────────────────────────
 /**
  * What makes a 토끼 a 토끼. Drawn on top of the hair, so the face and hair
@@ -324,10 +455,20 @@ export function character(ctx, cx, cy, av, opts = {}) {
     typing = 0,
     patted = false,
     ruffle = 0,
+    /** walking phase in radians — legs alternate, 0 stands still */
+    step = 0,
+    /** 0..1, shoulders and head sink: the difference between walking and trudging */
+    droop = 0,
+    crying = false,
+    /** 0..1, arms come up in front to hold a box */
+    carry = 0,
+    /** a small colour tag on the chest — which app a window-person belongs to */
+    badge = null,
   } = opts;
   ctx.save();
   ctx.globalAlpha = alpha;
 
+  const sink = Math.round(droop * 2);
   const y = Math.round(cy + bob);
   const hairDark = darken(av.hair, 0.28);
   const shirtDark = darken(av.shirt, 0.24);
@@ -336,30 +477,45 @@ export function character(ctx, cx, cy, av, opts = {}) {
 
   shadow(ctx, cx, cy, 18, 6);
 
-  // legs
-  px(ctx, cx - 5, y - 5, 4, 5, '#3c4356');
-  px(ctx, cx + 1, y - 5, 4, 5, '#3c4356');
-  px(ctx, cx - 6, y - 1, 5, 2, '#23283a');
-  px(ctx, cx + 1, y - 1, 5, 2, '#23283a');
+  // legs — one lifts while the other plants
+  const gait = step ? Math.sin(step) : 0;
+  const lLift = Math.round(Math.max(0, gait) * 2);
+  const rLift = Math.round(Math.max(0, -gait) * 2);
+  px(ctx, cx - 5, y - 5 - lLift, 4, 5, '#3c4356');
+  px(ctx, cx + 1, y - 5 - rLift, 4, 5, '#3c4356');
+  px(ctx, cx - 6, y - 1 - lLift, 5, 2, '#23283a');
+  px(ctx, cx + 1, y - 1 - rLift, 5, 2, '#23283a');
 
   // torso
-  const torsoY = y - 15;
+  const torsoY = y - 15 + sink;
   soft(ctx, cx - 7, torsoY, 14, 11, av.shirt);
   px(ctx, cx - 7, torsoY + 8, 14, 3, shirtDark);
   px(ctx, cx - 2, torsoY, 4, 4, lighten(av.shirt, 0.12)); // collar
+  if (badge) {
+    px(ctx, cx + 1, torsoY + 4, 4, 3, '#f2eee2');
+    px(ctx, cx + 2, torsoY + 5, 2, 1, badge);
+  }
 
-  // arms — they rest on the desk while typing
+  // arms — they rest on the desk while typing, and come up to carry a box
   const swing = typing ? Math.round(Math.sin(typing) * 1) : 0;
-  const lArmY = torsoY + 2 + swing;
-  const rArmY = Math.round(torsoY + 2 - armLift * 12 - swing);
-  px(ctx, cx - 10, lArmY, 3, 8, av.shirt);
-  px(ctx, cx - 10, lArmY + 8, 3, 3, av.skin);
-  px(ctx, cx + 7, rArmY, 3, 8, av.shirt);
-  px(ctx, cx + 7, rArmY + 8, 3, 3, av.skin);
+  const hug = Math.round(carry * 4);
+  const lArmY = torsoY + 2 + swing - hug;
+  const rArmY = Math.round(torsoY + 2 - armLift * 12 - swing - hug);
+  px(ctx, cx - 10 + hug, lArmY, 3, 8, av.shirt);
+  px(ctx, cx - 10 + hug, lArmY + 8, 3, 3, av.skin);
+  px(ctx, cx + 7 - hug, rArmY, 3, 8, av.shirt);
+  px(ctx, cx + 7 - hug, rArmY + 8, 3, 3, av.skin);
+  if (carry > 0.05) {
+    // Held against the chest, then the hands drawn back over its edges — a box
+    // with no hands on it looks stuck to the shirt rather than carried.
+    box(ctx, cx, torsoY + 11, carry, 13, 9);
+    px(ctx, cx - 8, torsoY + 5, 3, 3, av.skin);
+    px(ctx, cx + 5, torsoY + 5, 3, 3, av.skin);
+  }
 
   // neck + head
-  px(ctx, cx - 2, y - 17, 4, 3, skinDark);
-  const headY = y - 27;
+  px(ctx, cx - 2, y - 17 + sink, 4, 3, skinDark);
+  const headY = y - 27 + sink;
   soft(ctx, hx - 7, headY, 14, 12, av.skin);
   px(ctx, hx - 7, headY + 10, 14, 2, skinDark);
 
@@ -403,6 +559,27 @@ export function character(ctx, cx, cy, av, opts = {}) {
   headpiece(ctx, hx, headY, av);
 
   // face
+  if (crying) {
+    // Eyes squeezed shut — the arch points the other way from the contented one.
+    px(ctx, hx - 5, headY + 5, 1, 1, '#2b2b33');
+    px(ctx, hx - 4, headY + 6, 2, 1, '#2b2b33');
+    px(ctx, hx - 2, headY + 5, 1, 1, '#2b2b33');
+    px(ctx, hx + 1, headY + 5, 1, 1, '#2b2b33');
+    px(ctx, hx + 2, headY + 6, 2, 1, '#2b2b33');
+    px(ctx, hx + 4, headY + 5, 1, 1, '#2b2b33');
+    // and two drops on their way down, out of step with each other
+    const fall = (Math.abs(gait) * 6) | 0;
+    px(ctx, hx - 4, headY + 8 + fall, 1, 2, '#8fd0ee');
+    px(ctx, hx + 3, headY + 7 + ((fall + 3) % 7), 1, 2, '#8fd0ee');
+    px(ctx, hx - 6, headY + 7, 2, 1, '#ff9f9f');
+    px(ctx, hx + 4, headY + 7, 2, 1, '#ff9f9f');
+    // downturned mouth
+    px(ctx, hx - 1, headY + 9, 2, 1, darken(av.skin, 0.45));
+    px(ctx, hx - 2, headY + 10, 1, 1, darken(av.skin, 0.45));
+    px(ctx, hx + 1, headY + 10, 1, 1, darken(av.skin, 0.45));
+    ctx.restore();
+    return headY;
+  }
   if (patted) {
     // eyes closed contentedly — a shallow arch, raised in the middle
     px(ctx, hx - 5, headY + 6, 1, 1, '#2b2b33');

@@ -88,9 +88,15 @@ body:has(.update-bar:not([hidden])) .app { height: calc(100% - 38px); }
 .update-bar[hidden] { display: none; }
 .update-bar span { flex: 1; }
 
+/* The two side columns are sized by variables rather than by the template, so
+ * the breakpoints below and the drag handle can both move one without knowing
+ * about the other. An inline --right-w set by the drag wins over every rule
+ * here, which is exactly the precedence a manual override should have. */
 .app {
+  --left-w: 260px;
+  --right-w: 340px;
   display: grid;
-  grid-template-columns: 260px minmax(0, 1fr) 340px;
+  grid-template-columns: var(--left-w) minmax(0, 1fr) 6px var(--right-w);
   height: 100%;
   gap: 1px;
   background: var(--line);
@@ -252,6 +258,84 @@ body:has(.update-bar:not([hidden])) .app { height: calc(100% - 38px); }
   transform: scale(1.06);
 }
 
+/* ── zone signs ────────────────────────────────────────────────────────── */
+/* Two signs on the back wall. They never move and never update, so they carry
+ * the room's structure without competing with anything in it — but they hang
+ * over pixel art whose colour is not ours to choose, so they get the same dark
+ * chip every other overlay label uses rather than trusting the wall behind. */
+.zlabel {
+  position: absolute;
+  top: 0; left: 0;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #16130fd9;
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--line-soft);
+  font-size: 10px; font-weight: 600;
+  letter-spacing: .1em;
+  color: #a99d8c;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* ── window people + group tables ──────────────────────────────────────── */
+/* These labels are dense — a dozen of them ring one table — so they carry less
+ * weight than a crew nameplate and truncate hard. Hovering is what expands one
+ * to its full title; the rest stay out of the way. */
+.wplate {
+  position: absolute;
+  top: 0; left: 0;
+  max-width: 74px;
+  pointer-events: auto;
+  cursor: pointer;
+  user-select: none;
+  transition: max-width var(--calm);
+}
+.wplate b {
+  display: block;
+  font-size: 10px; font-weight: 500; letter-spacing: .01em;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #16130fcc;
+  backdrop-filter: blur(6px);
+  border: 1px solid var(--line-soft);
+  color: #cdc2b1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: border-color var(--calm), color var(--calm), transform var(--press);
+}
+.wplate:hover { max-width: 230px; z-index: 6; }
+.wplate:hover b { border-color: #4d4437; color: var(--ink); }
+.wplate:active b { transform: scale(0.94); }
+/* Minimized: still yours, just not on screen. */
+.wplate.dim { opacity: .45; }
+.wplate.active b { border-color: #6b5a3c; color: #f6ecd6; }
+
+.gplate {
+  position: absolute;
+  top: 0; left: 0;
+  display: flex; align-items: center; gap: 6px;
+  padding: 2px 3px 2px 8px;
+  border-radius: 999px;
+  background: #16130fe6;
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-1);
+  white-space: nowrap;
+  pointer-events: auto;
+  z-index: 4;
+  transition: border-color var(--calm), background var(--calm), transform var(--press);
+}
+.gplate b {
+  font-size: 11px; font-weight: 600; letter-spacing: .005em;
+  color: var(--ink);
+  cursor: text;
+}
+.gplate b:hover { color: var(--accent); }
+.gplate button { padding: 1px 8px; font-size: 10px; letter-spacing: .01em; box-shadow: none; }
+.gplate.drop { border-color: var(--accent); background: #3a2c14f2; transform: scale(1.05); }
+
 /* ── usage + system ────────────────────────────────────────────────────── */
 .usage .lim { margin-bottom: 9px; }
 .usage .lim:last-child { margin-bottom: 0; }
@@ -279,6 +363,18 @@ body:has(.update-bar:not([hidden])) .app { height: calc(100% - 38px); }
   display: flex; justify-content: space-between; gap: 8px;
   font-size: 12px; color: var(--ink-dim);
 }
+.tasks .task {
+  cursor: grab;
+  user-select: none;
+  touch-action: none; /* the row owns the gesture — see startCardDrag() */
+  padding: 1px 3px;
+  margin: 0 -3px;
+  border-radius: 6px;
+  transition: background var(--calm), transform var(--press);
+}
+.tasks .task:hover { background: #ffffff08; }
+.tasks .task:active { cursor: grabbing; transform: scale(0.985); }
+.tasks .task.lifted { opacity: .3; transform: none; }
 .tasks .task b { font-weight: 500; color: var(--ink); }
 .tasks .task span { font-variant-numeric: tabular-nums; flex: none; }
 .tasks .task.running b { color: var(--accent); }
@@ -393,6 +489,202 @@ body:has(.update-bar:not([hidden])) .app { height: calc(100% - 38px); }
 .msg.user.in { animation-name: msg-in-right; }
 @keyframes msg-in { from { opacity: 0; transform: translate(-6px, 6px) scale(.98); } }
 @keyframes msg-in-right { from { opacity: 0; transform: translate(6px, 6px) scale(.98); } }
+
+/* ── the width handle ─────────────────────────────────────────────────────
+ * A 6px column between the room and the conversation. At rest it is just the
+ * seam the grid already draws; the grip only appears under the pointer, so the
+ * control is discoverable without being a permanent piece of furniture. */
+.resizer {
+  position: relative;
+  cursor: col-resize;
+  background: transparent;
+  transition: background var(--calm);
+  /* Dragging must not select the text on either side of it. */
+  user-select: none;
+  touch-action: none;
+}
+.resizer::before {
+  content: '';
+  position: absolute;
+  top: 50%; left: 50%;
+  width: 2px; height: 26px;
+  transform: translate(-50%, -50%) scaleY(.4);
+  border-radius: 2px;
+  background: var(--ink-mute);
+  opacity: 0;
+  transition: opacity var(--calm), transform var(--calm);
+}
+.resizer:hover::before,
+.resizer:focus-visible::before,
+.resizer.dragging::before { opacity: .75; transform: translate(-50%, -50%) scaleY(1); }
+.resizer:hover, .resizer.dragging { background: #ffffff0a; }
+.resizer.dragging::before { background: var(--accent); opacity: 1; }
+/* While a drag is live the whole window keeps the resize cursor, even where the
+ * pointer has run off the handle. */
+body.resizing { cursor: col-resize; user-select: none; }
+
+/* ── markdown in the conversation ─────────────────────────────────────────
+ * An answer is prose, so it gets prose spacing: the first and last blocks sit
+ * flush with the bubble, and everything between breathes. Sizes are relative to
+ * the bubble's own 13px so the whole thing scales as one. */
+.msg.assistant > :first-child { margin-top: 0; }
+.msg.assistant > :last-child { margin-bottom: 0; }
+.msg.assistant p, .work-note p { margin: 0 0 .6em; }
+.msg.assistant h1, .msg.assistant h2, .msg.assistant h3,
+.msg.assistant h4, .msg.assistant h5, .msg.assistant h6,
+.work-note h1, .work-note h2, .work-note h3 {
+  margin: 1em 0 .45em;
+  font-weight: 650;
+  letter-spacing: -.01em;
+  line-height: 1.35;
+  color: var(--ink);
+}
+.msg.assistant h1 { font-size: 1.32em; }
+.msg.assistant h2 { font-size: 1.18em; }
+.msg.assistant h3 { font-size: 1.06em; }
+.msg.assistant h4, .msg.assistant h5, .msg.assistant h6 { font-size: 1em; color: var(--ink-dim); }
+.msg.assistant ul, .msg.assistant ol, .work-note ul, .work-note ol {
+  margin: 0 0 .6em;
+  padding-left: 1.35em;
+}
+.msg.assistant li, .work-note li { margin: .16em 0; }
+.msg.assistant li::marker { color: var(--ink-mute); }
+.msg.assistant strong { font-weight: 650; color: #fbf3e4; }
+.msg.assistant em { font-style: italic; }
+.msg.assistant s { color: var(--ink-mute); }
+.msg.assistant hr {
+  margin: .9em 0;
+  border: 0; border-top: 1px solid var(--line);
+}
+.msg.assistant blockquote, .work-note blockquote {
+  margin: 0 0 .6em;
+  padding: 0 0 0 .8em;
+  border-left: 2px solid var(--line);
+  color: var(--ink-dim);
+}
+
+/* Code keeps its own material — a panel inside a panel — and never widens the
+ * bubble: a long line scrolls itself rather than pushing the column out. */
+.msg.assistant code, .work-note code {
+  font: .88em/1.5 var(--mono);
+  background: #ffffff0d;
+  border-radius: 5px;
+  padding: .1em .35em;
+}
+.msg.assistant pre, .work-note pre {
+  margin: 0 0 .6em;
+  padding: 8px 10px;
+  background: #12100dcc;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #3a332b transparent;
+}
+.msg.assistant pre code, .work-note pre code {
+  background: none; padding: 0;
+  font-size: .86em;
+  white-space: pre;
+}
+
+.md-table { overflow-x: auto; margin: 0 0 .6em; scrollbar-width: thin; }
+.msg.assistant table {
+  border-collapse: collapse;
+  font-size: .94em;
+  min-width: 100%;
+}
+.msg.assistant th, .msg.assistant td {
+  padding: 4px 9px;
+  border: 1px solid var(--line);
+  text-align: left;
+  white-space: nowrap;
+}
+.msg.assistant th {
+  background: #ffffff08;
+  font-weight: 600;
+  color: var(--ink-dim);
+}
+
+/* A cited source reads as a word, not as an address. */
+.msg.assistant a, .work-note a {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px solid #f0b45a4d;
+  transition: border-color var(--calm), color var(--calm);
+}
+.msg.assistant a:hover, .work-note a:hover { border-bottom-color: var(--accent); }
+
+/* ── the work tray ────────────────────────────────────────────────────────
+ * Everything a person does before answering, gathered into one temporary block
+ * at the foot of the conversation. It is deliberately quieter than a message:
+ * no bubble, no shadow, dimmer ink — it is not part of the record, and it
+ * disappears the moment the answer takes its place. */
+.work {
+  align-self: stretch;
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--line-soft);
+  background: #ffffff05;
+}
+.work.in { animation: msg-in 280ms cubic-bezier(0.32, 0.72, 0, 1) both; }
+.work-head {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 12px; color: var(--ink-dim);
+}
+/* The pulse is the only thing on screen that says "still going" while the model
+ * is silent, so it breathes rather than blinks. */
+.work-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--accent); flex: none;
+  animation: work-pulse 1400ms ease-in-out infinite;
+}
+@keyframes work-pulse {
+  0%, 100% { opacity: .35; transform: scale(.8); }
+  50%      { opacity: 1;   transform: scale(1); }
+}
+.work-what { font-weight: 600; }
+.work-elapsed { margin-left: auto; color: var(--ink-mute); font-size: 11px; font-variant-numeric: tabular-nums; }
+
+.work-tools { font-size: 11px; color: var(--ink-mute); }
+.work-tools > summary {
+  cursor: pointer; list-style: none;
+  padding: 3px 0;
+  color: var(--ink-mute);
+  transition: color var(--calm);
+}
+.work-tools > summary::-webkit-details-marker { display: none; }
+.work-tools > summary::before {
+  content: '›';
+  display: inline-block; width: 11px;
+  transform: rotate(0deg);
+  transition: transform var(--calm);
+}
+.work-tools[open] > summary::before { transform: rotate(90deg); }
+.work-tools > summary:hover { color: var(--ink-dim); }
+.work-tool {
+  padding: 2px 0 2px 11px;
+  font-family: var(--mono); font-size: 10.5px;
+  color: var(--ink-mute); opacity: .6;
+  overflow-wrap: anywhere;
+}
+.work-tool.done { opacity: 1; }
+.work-tool.bad { color: var(--bad); }
+
+.work-note {
+  font-size: 12.5px; line-height: 1.55;
+  color: var(--ink-dim);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.work-note.streaming::after {
+  content: '';
+  display: inline-block; width: 6px; height: 12px;
+  margin-left: 2px; vertical-align: -2px;
+  background: var(--ink-mute);
+  animation: work-caret 1000ms steps(1) infinite;
+}
+@keyframes work-caret { 50% { opacity: 0; } }
 
 .composer { display: grid; gap: 7px; }
 /* `display: grid` outranks the UA's [hidden] rule, so without this the composer
@@ -509,6 +801,13 @@ button.ghost:hover { color: var(--ink); border-color: #4d4437; }
 .sheet h3 { margin: 0; font-size: 16px; font-weight: 650; letter-spacing: -.01em; }
 .sheet-actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
 
+.sheet.narrow { width: min(360px, 90vw); gap: 10px; }
+/* The consequence, said once, in the app's warning colour — not a wall of
+ * caution text. The sheet asks the question; this is the part that cannot be
+ * undone. */
+.leave-note { margin: 0; font-size: 13px; line-height: 1.55; color: #f0a79a; }
+#leave-yes { background: #a8483c; color: #ffe6e0; }
+
 .persona-list { display: grid; gap: 8px; }
 .persona {
   display: grid;
@@ -579,6 +878,51 @@ button.tiny { padding: 3px 9px; font-size: 11px; letter-spacing: .01em; }
   border-radius: 7px; padding: 4px 8px; font-size: 12px; outline: none;
 }
 .saved { margin-right: auto; font-size: 12px; color: var(--ok); }
+
+/* ── laid out for a wide screen ────────────────────────────────────────── */
+/* This is used landscape, so the room is the thing that gets the space and the
+ * two columns beside it are sized to their content rather than to a fraction of
+ * the window. What changes across sizes is the columns; the room only ever gets
+ * whatever is left, and picks its own whole-number zoom to fit (office.js). */
+@media (min-width: 1500px) {
+  .app { --left-w: 288px; --right-w: 380px; }
+}
+@media (max-width: 1180px) {
+  .app { --left-w: 208px; --right-w: 288px; }
+  .panel { padding: 9px 10px; }
+}
+
+/* Wide and short is the normal case here — a laptop lid, or a monitor with the
+ * room taking the middle third. Vertical padding is what has to give, because
+ * losing 40px of room height costs a whole zoom step. */
+@media (max-height: 860px) {
+  .left, .right { padding: 9px; gap: 9px; }
+  .panel { padding: 9px 10px; }
+  .panel h2 { margin-bottom: 6px; }
+  .hint { margin: 4px auto 8px; }
+  .hint-sm { margin-bottom: 6px; }
+}
+@media (max-height: 720px) {
+  /* The wordmark goes, not the 유형 button — that is the only way in to the
+   * type editor. */
+  .brand .logo, .brand small { display: none; }
+  .brand b { font-size: 13px; }
+  .update-bar { height: 32px; }
+  body:has(.update-bar:not([hidden])) .app { height: calc(100% - 32px); }
+}
+
+/* Portrait is not what this is for, but it must not fall apart: the room keeps
+ * the top and the two columns share the bottom, still scrolling. */
+@media (max-aspect-ratio: 1/1) {
+  .app {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: minmax(220px, 1fr) minmax(0, 1fr);
+  }
+  .center { grid-column: 1 / -1; }
+  /* Stacked, the columns are side by side and share the width evenly — there
+     is no boundary left for the handle to sit on. */
+  .resizer { display: none; }
+}
 
 /* ── accessibility answers ─────────────────────────────────────────────── */
 /* Reduced motion keeps the feedback and drops the travel. */

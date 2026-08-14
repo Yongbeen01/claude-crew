@@ -8,6 +8,7 @@ import { shutdownAll, poke, all as allCrew, setSummary } from './crew.js';
 import { refreshSummaries } from './summarize.js';
 import { startUpdatePolling } from './update.js';
 import { ensureToolbox } from './toolbox.js';
+import { startDesktopPolling, shutdownDesktop } from './desktop.js';
 import * as timers from './timers.js';
 import { logActivity } from './bus.js';
 
@@ -47,6 +48,8 @@ server.listen(config.port, config.host, () => {
   // showing a job name.
   setInterval(() => refreshSummaries(allCrew(), setSummary), 15_000).unref?.();
   startUpdatePolling();
+  // 이 컴퓨터에 열려 있는 창·탭 — 오피스 오른쪽 구역에 앉는 사람들.
+  startDesktopPolling();
   // PPT·엑셀용 공용 패키지. 처음 한 번만 받고, 그 뒤로는 사람마다 링크만 겁니다.
   ensureToolbox();
 
@@ -70,6 +73,7 @@ function shutdown() {
   console.log('\n종료 중… 세션을 정리합니다.');
   timers.shutdown();
   shutdownAll();
+  shutdownDesktop();
   server.close();
   // Give the taskkill in Runner.stop() a beat to land before the process goes.
   setTimeout(() => process.exit(0), 2500).unref?.();

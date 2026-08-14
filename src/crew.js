@@ -10,6 +10,7 @@ import { issueToken, revokeTokensFor, mcpConfigFor, officeToolNames, tokenFor, b
 import { briefing } from './jobs.js';
 import * as approvals from './approvals.js';
 import { forgetSummary } from './summarize.js';
+import { handover } from './handover.js';
 
 /**
  * Who is sitting in the office right now.
@@ -41,11 +42,16 @@ class Person {
     this.createdAt = Date.now();
     this.runner = null;
     this.persona = null;
+    /** set the moment 종료 is confirmed — the office plays the walk out from it */
+    this.leavingAt = null;
   }
 
   get state() {
     if (!this.runner) return 'offline';
     const r = this.runner;
+    // On the way out, and it outranks everything: whatever else is true of this
+    // person, what the office should show is someone packing.
+    if (this.leavingAt) return 'leaving';
     if (!r.alive) return 'exited';
     // Waiting on a click outranks "working" — it is the one state the user has
     // to do something about.
@@ -78,6 +84,7 @@ class Person {
       approvalCount: this.approvalCount,
       trusted: approvals.isTrusted(this.id),
       createdAt: this.createdAt,
+      leavingAt: this.leavingAt,
       session: r,
       // FNV-1a over the id: the same person always gets the same face.
       seed: hashCode(this.id),
@@ -152,7 +159,16 @@ function wireRunner(person) {
     bus.emit('message', { personId: person.id, role: 'assistant', text, at: Date.now() });
   });
 
+  // What the person is doing this instant, so the chat can say "생각 중" only
+  // when it is actually thinking. The thinking block carries no text — current
+  // models never return the raw reasoning — but its timing is real.
+  r.on('phase', (phase) => {
+    bus.emit('phase', { personId: person.id, phase, at: Date.now() });
+  });
+
   r.on('tool', (t) => {
+    // The chat folds these away; only the ones the user opens are ever read.
+    bus.emit('tool', { personId: person.id, ...t, at: Date.now() });
     if (t.phase === 'start') {
       logActivity('tool', `${person.name} — ${t.name}`, person.id);
     } else {
@@ -165,6 +181,9 @@ function wireRunner(person) {
   });
 
   r.on('result', (ev) => {
+    // The turn is over — the chat clears everything it was showing while the
+    // person worked and keeps only the answer.
+    bus.emit('turn-end', { personId: person.id, isError: !!ev.is_error, at: Date.now() });
     if (ev.is_error) {
       logActivity('error', `${person.name} — 턴 실패: ${String(ev.result ?? '').slice(0, 80)}`, person.id);
     }
@@ -302,6 +321,9 @@ export function poke(id, text) {
 export function send(id, text, opts = {}) {
   const person = people.get(id);
   if (!person?.runner) return false;
+  // Someone on the way out is writing their handover; a new instruction now
+  // would either be dropped on the floor or derail it.
+  if (person.leavingAt && !opts.hidden) return false;
   const ok = person.runner.send(text, opts);
   if (ok && !opts.hidden) {
     bus.emit('message', { personId: id, role: 'user', text, at: Date.now() });
@@ -333,6 +355,46 @@ export function attach(id, files) {
   }
   if (saved.length) logActivity('file', `${person.name} ← 파일 ${saved.length}개`, id);
   return saved;
+}
+
+/**
+ * Someone was dragged to the door and the user said yes.
+ *
+ * Two things run at once. The person is asked what the next one should know and
+ * the answer is filed away (handover.js), while the office plays them crying,
+ * packing and trudging out. Whichever finishes last decides when the seat
+ * actually empties — a fast answer must not cut the walk short, and a slow one
+ * must not leave a ghost sitting at the desk.
+ *
+ * Not cancellable on purpose. "나간 사람은 다시 돌아오지 않아요" is the promise the
+ * confirmation makes, and a session cannot be un-killed anyway.
+ */
+export async function leave(id) {
+  const person = people.get(id);
+  if (!person) return false;
+  if (person.leavingAt) return true; // already on the way out
+
+  person.leavingAt = Date.now();
+  logActivity('leave', `${person.name} 퇴근 — 남길 것을 정리합니다`, id);
+  // From here on nothing this person does waits for a click — not what is
+  // already pending, and not what the handover turn itself reaches for. A
+  // single stray tool call would otherwise park the departure indefinitely.
+  approvals.setLeaving(id);
+  announce();
+
+  const walk = new Promise((resolve) => { setTimeout(resolve, config.leaveAnimMs).unref?.(); });
+  let result = null;
+  try {
+    result = await handover(person);
+  } catch {
+    /* nobody may be trapped in the office by a failed handover */
+  }
+  await walk;
+
+  // The user may have closed the tab, or the app may be shutting down; either
+  // way the person is gone from the model already.
+  if (people.has(id)) fire(id);
+  return result ?? true;
 }
 
 export function fire(id, { keepFiles = true } = {}) {

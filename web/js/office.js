@@ -1,6 +1,7 @@
 import {
-  TILE, px, soft, floorPatch, rug, room, shelf, whiteboard, wallClock, windowPane,
-  plant, cooler, printer, chair, desk, emptyDesk, character, bubble, avatarOf, darken,
+  px, floorPatch, rug, room, shelf, whiteboard, wallClock, windowPane,
+  plant, cooler, printer, chair, desk, emptyDesk, character, bubble, avatarOf,
+  door, roundTable, zoneFloor, partition,
 } from './sprites.js';
 
 /**
@@ -9,6 +10,18 @@ import {
  * Draw at 1x into a back-buffer, then blit with imageSmoothingEnabled=false so
  * the art scales up with hard pixel edges. Text is *not* drawn on the canvas —
  * nameplates are DOM nodes positioned over it, so they stay crisp at any zoom.
+ *
+ * The room is laid out for a wide window, and it holds two zones plus a way out.
+ *
+ *   ┌ 일하는 사람들 ┬ 내가 열어둔 것들 ──────────────┐
+ *   │ desk  desk    │   ( o o )     ( o o )        ▓  ← 문
+ *   │ desk  desk    │    table       table         ▓
+ *   ├───────────────┴─────── 복도 ─────────────────┘
+ *
+ * Left zone: one Claude session per desk. Right zone: every window and browser
+ * tab open on this PC, seated at the table for the piece of work it belongs to.
+ * They are different kinds of thing and they never mix, which is why there is a
+ * partition between them rather than a gap.
  */
 
 const CELL_W = 96;
@@ -19,11 +32,45 @@ const RUG_TOP = 22;
 const RUG_H = 56;
 const STAND_Y = 46; // floor point the person stands on
 const DESK_Y = 74; // front edge of the desk
-const COLS = 2;
-const WALL_TOP = 46;
+const CREW_COLS = 2;
+
+const WALL_TOP = 42;
 const WALL = 4;
-const PAD = 14;
-const MAX_SCALE = 4;
+const PAD = 12;
+/**
+ * The bottom strip is a corridor, not padding — it is walked along on the way
+ * out, and the door opens off it. It has to be taller than the door or the
+ * frame runs off the bottom of the room and out through the wall.
+ */
+const CORRIDOR_H = 52;
+const DIVIDER = 10;
+const DOOR_BAY = 32;
+const DOOR_H = 34;
+const MAX_SCALE = 5;
+
+/**
+ * Windows zone geometry.
+ *
+ * These numbers are chosen for the *shape* of the room, not just to fit the
+ * furniture. The view scales by whole numbers only — a fractional one brings
+ * back blurry pixels — so a room whose proportions do not match the stage loses
+ * a whole zoom step to the floor(). At roughly 470×334 the room is about 1.4:1,
+ * which is close enough to a wide stage that the fit lands on the step rather
+ * than just under it. Widening the zone by 40px is what costs half the size.
+ */
+const POD_W = 92;
+const POD_H = 106;
+const POD_COLS_MAX = 4;
+const LOOSE_STEP = 30;
+const LOOSE_ROW_H = 44;
+/**
+ * The floor under the windows zone, not its usual size — it grows into whatever
+ * the stage has spare. Keeping the floor low is what lets the whole room land
+ * on a 2× or 3× zoom instead of 1×: the minimum room is what the whole-number
+ * fit is computed from, and 40px of unused minimum width costs a zoom step.
+ */
+const WIN_MIN_W = 120;
+const ZONE_MIN_H = 196;
 
 /** Monitor glow + desk lamp per state. */
 const LOOK = {
@@ -32,11 +79,38 @@ const LOOK = {
   idle: { screen: '#1b2430', accent: '#5b8def', scan: false, lamp: null },
   sleeping: { screen: '#171c24', accent: '#3a3f4c', scan: false, lamp: null },
   awaiting_approval: { screen: '#3a1b1b', accent: '#e0705b', scan: false, lamp: '#e0705b' },
+  leaving: { screen: '#14161a', accent: '#2b303c', scan: false, lamp: null },
   exited: { screen: '#14161a', accent: '#2b303c', scan: false, lamp: null },
   offline: { screen: '#14161a', accent: '#2b303c', scan: false, lamp: null },
 };
 
 const RUGS = ['#7a6ea0', '#6a8f7a', '#a08268', '#8a6f8f', '#6f88a0', '#a08a60', '#7f7f8f'];
+const TABLES = ['#8a6f5a', '#6f7f8a', '#7f8a6f', '#8a6f7f', '#8a806f', '#6f8a85'];
+
+/**
+ * Leaving, in milliseconds from the moment the office first sees it.
+ * The clock is the client's, not the server's: the walk has to line up with
+ * what is on screen, and the two machines' idea of "now" is the same machine
+ * here but need not stay that way.
+ */
+const CRY_MS = 2400;
+const PACK_MS = 2600;
+const WALK_MS = 3600;
+const FADE_MS = 600;
+
+function hash(str) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < String(str).length; i += 1) {
+    h ^= String(str).charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h;
+}
+
+const APP_HUES = ['#5b8def', '#5fd39a', '#f0b45a', '#e0705b', '#a77bd8', '#4ec3d9', '#e88fc0'];
+function appColor(app) {
+  return APP_HUES[hash(app ?? '') % APP_HUES.length];
+}
 
 export class Office {
   constructor(canvas, plateHost) {
@@ -45,7 +119,7 @@ export class Office {
     this.plateHost = plateHost;
     this.bb = document.createElement('canvas');
     this.bctx = this.bb.getContext('2d');
-    this.state = { crew: [], meta: { maxSeats: 4 } };
+    this.state = { crew: [], meta: { maxSeats: 4 }, desktop: { people: [] }, groups: [] };
     this.scale = 3;
     this.hitboxes = [];
     this.hoverSeat = null;
@@ -54,20 +128,42 @@ export class Office {
     this.pressSeat = null;
     this.selectedId = null;
     this.plates = new Map();
+    this.winPlates = new Map();
+    this.groupPlates = new Map();
+    // Two standing signs, so it is never a guess which half of the room is
+    // which. Created once — they are the only fixtures in the overlay.
+    this.zoneLabels = ['일하는 사람들', '내가 열어둔 것들'].map((text) => {
+      const node = document.createElement('div');
+      node.className = 'zlabel';
+      node.textContent = text;
+      plateHost.appendChild(node);
+      return node;
+    });
     this.pat = { id: null, count: 0, lastDir: 0, until: 0, ruffleUntil: 0 };
+    /** personId -> performance.now() when this office first saw them leaving */
+    this.leaveClock = new Map();
+    /** in-flight pointer gesture, see _onDown */
+    this.press = null;
+    this.drag = null;
+    this.geom = null;
+    /** a card dragged in from a side panel is not our gesture, but the room
+     *  still has to light up for it — main.js sets the group id it is over */
+    this.dropHint = null;
+
     this.onSeatClick = () => {};
     this.onPersonClick = () => {};
+    this.onDropAtDoor = () => {};
+    this.onWindowClick = () => {};
+    this.onWindowDrop = () => {};
+    this.onGroupToggle = () => {};
+    this.onGroupRename = () => {};
 
-    canvas.addEventListener('mousemove', (e) => this._onMove(e));
+    canvas.addEventListener('mousemove', (e) => this._onHover(e));
     canvas.addEventListener('mouseleave', () => { this.hoverSeat = null; });
-    canvas.addEventListener('click', (e) => this._onClick(e));
-    canvas.addEventListener('pointerdown', (e) => {
-      this.pressSeat = this._hit(this._toBuffer(e))?.seat ?? null;
-    });
-    // Releasing anywhere clears it — including a drag away, which is how a tap
-    // is cancelled.
-    for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) {
-      canvas.addEventListener(ev, () => { this.pressSeat = null; });
+    canvas.addEventListener('pointerdown', (e) => this._onDown(e));
+    canvas.addEventListener('pointermove', (e) => this._onMove(e));
+    for (const ev of ['pointerup', 'pointercancel']) {
+      canvas.addEventListener(ev, (e) => this._onUp(e));
     }
   }
 
@@ -79,49 +175,190 @@ export class Office {
     return Math.max(1, this.state.meta?.maxSeats ?? 4);
   }
 
-  /** Back-buffer size in 1x pixels: enough room for every seat plus walls. */
+  get windowPeople() {
+    return this.state.desktop?.people ?? [];
+  }
+
+  get groups() {
+    return this.state.groups ?? [];
+  }
+
+  // ── layout ────────────────────────────────────────────────────────────────
+  /**
+   * Everything is computed from the two populations, once per frame. Cheap
+   * enough at 24fps, and it means a window opening on the far side of the PC
+   * reflows the room without any invalidation bookkeeping.
+   *
+   * The room *grows into* the stage rather than shrinking to fit it. Zoom is
+   * whole-number only, so a fixed-size room spends most of its life just under
+   * a step — 470px wide in a 930px stage renders at 1×, and half the screen is
+   * wasted on a picture at half the size it could be. So: pick the largest
+   * whole zoom the minimum room fits at, then hand the leftover pixels to the
+   * windows zone and the corridor. The room is always exactly the stage.
+   */
   _layout() {
-    const rows = Math.ceil(this.seats / COLS);
-    const w = WALL * 2 + PAD * 2 + COLS * CELL_W;
-    const h = WALL_TOP + PAD + rows * CELL_H + PAD + WALL;
-    return { rows, w, h };
-  }
+    const host = this.canvas.closest('.stage') ?? this.canvas.parentElement;
+    const availW = Math.max(160, host.clientWidth);
+    const availH = Math.max(160, host.clientHeight);
 
-  _seatOrigin(seat, layout) {
-    const col = seat % COLS;
-    const row = Math.floor(seat / COLS);
+    const crewRows = Math.ceil(this.seats / CREW_COLS);
+    const aiW = CREW_COLS * CELL_W;
+    const aiH = crewRows * CELL_H;
+
+    // Off Windows there is no way to enumerate what is open, so there is no
+    // second zone — the room is just the desks and the door rather than a large
+    // empty area labelled with something this machine cannot show.
+    const showWin = this.state.desktop?.supported !== false;
+    const chromeW = WALL + PAD + aiW + (showWin ? DIVIDER : 0) + DOOR_BAY + WALL;
+    const chromeH = WALL_TOP + PAD + CORRIDOR_H + WALL;
+
+    const people = this.windowPeople;
+    const byGroup = new Map();
+    for (const g of this.groups) byGroup.set(g.id, []);
+    const loose = [];
+    for (const p of people) {
+      if (p.groupId && byGroup.has(p.groupId)) byGroup.get(p.groupId).push(p);
+      else loose.push(p);
+    }
+    const podCount = byGroup.size;
+
+    // How much room the contents want, before the stage has a say.
+    //
+    // Zooming further in is not automatically better: at 3× this room would be
+    // 414px across and the windows zone one table wide, while 2× fits three. So
+    // the zoom is chosen from what has to fit — and how much has to fit depends
+    // on how the tables are arranged, which is why every column count gets
+    // costed and the one that buys the biggest zoom wins. Four tables in a row
+    // is a short wide room; four in a column is a tall narrow one, and only one
+    // of those matches the screen.
+    let best = null;
+    for (let cols = 1; cols <= POD_COLS_MAX; cols += 1) {
+      const winWant = showWin ? Math.max(WIN_MIN_W, cols * POD_W) : 0;
+      const lCols = Math.max(4, Math.floor((winWant - 24) / LOOSE_STEP));
+      const ww = chromeW + winWant;
+      const hh = chromeH + Math.max(
+        aiH, ZONE_MIN_H,
+        Math.ceil(podCount / cols) * POD_H + Math.ceil(loose.length / lCols) * LOOSE_ROW_H + 16,
+      );
+      const s = Math.max(1, Math.min(MAX_SCALE, Math.floor(Math.min(availW / ww, availH / hh))));
+      if (!best || s > best.s) best = { s, ww, hh };
+      if (cols >= podCount) break;
+    }
+
+    const scale = best.s;
+    this.scale = scale;
+    const w = Math.max(best.ww, Math.floor(availW / scale));
+    const h = Math.max(best.hh, Math.floor(availH / scale));
+    const winW = w - chromeW;
+    const zoneH = h - chromeH;
+
+    const podCols = Math.max(1, Math.min(POD_COLS_MAX, Math.floor(winW / POD_W), podCount || 1));
+    const podRows = Math.ceil(podCount / podCols);
+    const looseCols = Math.max(4, Math.floor((winW - 24) / LOOSE_STEP));
+    const looseRows = Math.ceil(loose.length / looseCols);
+
+    const x0 = WALL + PAD;
+    const y0 = WALL_TOP + PAD;
+    const corridorY = y0 + zoneH + Math.round(CORRIDOR_H * 0.5);
+
+    // Crew desks, spread down whatever height the zone ended up with — a room
+    // that grew taller should give the desks more floor, not leave a strip of
+    // bare wood under them.
+    const cellStepY = Math.max(CELL_H, zoneH / crewRows);
+    const cells = [];
+    for (let seat = 0; seat < this.seats; seat += 1) {
+      const col = seat % CREW_COLS;
+      const row = Math.floor(seat / CREW_COLS);
+      const x = x0 + col * CELL_W;
+      const y = Math.round(y0 + row * cellStepY);
+      cells.push({ seat, x, y, cx: x + CELL_W / 2, standY: y + STAND_Y, deskY: y + DESK_Y });
+    }
+
+    // The waiting area is anchored to the bottom of the zone and the tables sit
+    // above it, so extra height opens up between them instead of leaving a gap
+    // under everything.
+    const winX = x0 + aiW + DIVIDER;
+    const looseH = looseRows * LOOSE_ROW_H;
+    const looseTop = y0 + zoneH - looseH - 4;
+    const podBand = (looseRows ? looseTop - 10 : y0 + zoneH) - y0;
+    const podStepX = winW / podCols;
+    // Normally a table gets its full height and any surplus on top. The floor
+    // is there for the case the surplus is negative — a zone squeezed by a lot
+    // of loose windows must still keep its tables inside itself.
+    const podStepY = podRows
+      ? Math.max(76, Math.min(POD_H, podBand / podRows), podBand / podRows)
+      : POD_H;
+
+    const pods = [];
+    let i = 0;
+    for (const g of this.groups) {
+      const members = byGroup.get(g.id) ?? [];
+      const cx = winX + (i % podCols) * podStepX + podStepX / 2;
+      // Centred in its share of the band, so a single row of tables sits in the
+      // middle of the zone rather than clinging to the top of it.
+      const cy = y0 + Math.floor(i / podCols) * podStepY + podStepY / 2 - 6;
+      pods.push({ group: g, members, cx, cy, ...this._ring(members, cx, cy) });
+      i += 1;
+    }
+
+    const seatsLoose = loose.map((p, n) => ({
+      person: p,
+      x: winX + 14 + (n % looseCols) * LOOSE_STEP,
+      y: looseTop + Math.floor(n / looseCols) * LOOSE_ROW_H + 24,
+    }));
+
     return {
-      x: WALL + PAD + col * CELL_W,
-      y: WALL_TOP + PAD + row * CELL_H,
+      w, h, x0, y0, zoneH, corridorY, showWin,
+      ai: { x: x0, y: y0, w: aiW, h: zoneH, cells },
+      win: {
+        x: winX, y: y0, w: winW, h: zoneH, pods, loose: seatsLoose,
+        looseTop, hasLoose: seatsLoose.length > 0,
+      },
+      divider: { x: x0 + aiW + Math.round((DIVIDER - 4) / 2), y: y0 - 6, h: zoneH + 6 },
+      door: { x: w - WALL, y: corridorY - DOOR_H / 2, h: DOOR_H, cx: w - WALL - 6, cy: corridorY },
     };
   }
 
-  /** Floor point a person stands on, and where their desk front edge sits. */
-  _seatAnchor(seat, layout) {
-    const o = this._seatOrigin(seat, layout);
-    return {
-      cx: o.x + CELL_W / 2,
-      standY: o.y + STAND_Y,
-      deskY: o.y + DESK_Y,
-      x: o.x,
-      y: o.y,
-    };
+  /**
+   * Where the members of one group sit. A flattened circle, because the room is
+   * seen from above at an angle; more than eight and a second ring forms inside
+   * rather than the outer one turning into a solid wall of shoulders.
+   */
+  _ring(members, cx, cy) {
+    const k = members.length;
+    const outer = Math.min(k, 6);
+    const inner = k - outer;
+    const rOut = Math.max(22, Math.min(32, 16 + outer * 2.8));
+    // Two people at a table sit across from each other, not one behind the
+    // other — starting the ring at the side is the difference between a pair
+    // and what looks like one person with a shadow.
+    const start = outer <= 2 ? 0 : -Math.PI / 2;
+    const seats = [];
+    for (let i = 0; i < outer; i += 1) {
+      const a = (i / Math.max(1, outer)) * Math.PI * 2 + start;
+      seats.push({ person: members[i], x: cx + Math.cos(a) * rOut, y: cy + Math.sin(a) * rOut * 0.7 });
+    }
+    for (let i = 0; i < inner; i += 1) {
+      const a = (i / Math.max(1, inner)) * Math.PI * 2 - Math.PI / 2 + 0.5;
+      const r = rOut * 0.5;
+      seats.push({ person: members[outer + i], x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r * 0.7 });
+    }
+    // Draw back-to-front so someone nearer the viewer overlaps someone further.
+    seats.sort((a, b) => a.y - b.y);
+    // Names go in two lanes. Six labels around one small table would otherwise
+    // pile into one line of unreadable ellipses; alternating them costs a
+    // little tidiness and buys every name being legible.
+    seats.forEach((s, i) => { s.lane = i % 2; });
+    return { seats, r: rOut };
   }
 
-  _resizeToFit() {
-    const { w, h } = this._layout();
+  /** The zoom is decided in _layout(); this only sizes the buffers to match. */
+  _resizeToFit(w, h) {
     if (this.bb.width !== w || this.bb.height !== h) {
       this.bb.width = w;
       this.bb.height = h;
     }
-    // Measure the stage, not the viewport: the viewport shrink-wraps the canvas,
-    // so asking it how much room there is would just echo the current size back.
-    const host = this.canvas.closest('.stage') ?? this.canvas.parentElement;
-    const availW = host.clientWidth;
-    const availH = host.clientHeight;
-    // Whole-number scale only — a fractional one reintroduces blurry edges.
-    const scale = Math.max(1, Math.min(MAX_SCALE, Math.floor(Math.min(availW / w, availH / h))));
-    this.scale = scale;
+    const scale = this.scale;
     const cw = w * scale;
     const ch = h * scale;
     if (this.canvas.width !== cw || this.canvas.height !== ch) {
@@ -132,67 +369,129 @@ export class Office {
     this.canvas.style.height = `${ch}px`;
   }
 
+  // ── render ────────────────────────────────────────────────────────────────
   render(now = performance.now()) {
-    this._resizeToFit();
-    const layout = this._layout();
+    const g = this._layout();
+    this.geom = g;
+    this._resizeToFit(g.w, g.h);
     const ctx = this.bctx;
-    const { w, h } = layout;
+    const { w, h } = g;
 
     ctx.clearRect(0, 0, w, h);
     floorPatch(ctx, 0, 0, w, h);
     room(ctx, 0, 0, w, h, WALL_TOP, WALL);
 
-    // wall dressing
-    shelf(ctx, 12, 12);
-    whiteboard(ctx, w - 60, 12);
-    wallClock(ctx, Math.round(w / 2), 22, new Date());
-    if (w > 220) windowPane(ctx, Math.round(w / 2) - 22, 44 - 24);
+    // Wall dressing, kept out from behind the two zone signs — those hang at
+    // the foot of the wall over the middle of each zone.
+    shelf(ctx, 10, 9);
+    wallClock(ctx, g.x0 + 52, 20, new Date());
+    whiteboard(ctx, Math.round(g.ai.x + g.ai.w - 44), 8);
+    if (w > 420) windowPane(ctx, w - 68, 10);
 
-    // floor props in the margins
-    plant(ctx, 12, h - 12);
-    cooler(ctx, w - 14, h - 12);
-    if (layout.rows > 1) printer(ctx, w - 16, WALL_TOP + PAD + CELL_H - 6);
+    // Zone floors — the only thing that says these are two different places.
+    zoneFloor(ctx, g.ai.x - 6, g.ai.y - 6, g.ai.w + 12, g.zoneH + 10, '#f0b45a');
+    if (g.showWin) {
+      zoneFloor(ctx, g.win.x - 6, g.win.y - 6, g.win.w + 12, g.zoneH + 10, '#7fd1c0');
+      partition(ctx, g.divider.x, g.divider.y, g.divider.h);
+    }
+
+    // floor props tucked into the corridor
+    plant(ctx, 14, h - 8);
+    cooler(ctx, g.win.x - 18, h - 8);
+    if (g.ai.cells.length > 2) printer(ctx, g.ai.x + g.ai.w - 10, h - 10);
 
     this.hitboxes = [];
-    const bySeat = new Map(this.state.crew.map((p) => [p.seat, p]));
 
-    for (let seat = 0; seat < this.seats; seat += 1) {
-      const a = this._seatAnchor(seat, layout);
-      const person = bySeat.get(seat) ?? null;
-      rug(ctx, a.x + 6, a.y + RUG_TOP, CELL_W - 12, RUG_H, RUGS[seat % RUGS.length]);
+    this._drawCrew(ctx, g, now);
+    if (g.showWin) this._drawWindows(ctx, g, now);
+
+    const doorHot = this.drag?.kind === 'crew' && this.drag.over === 'door';
+    door(ctx, g.door.x, g.door.y, g.door.h, WALL, { hover: doorHot });
+    this.hitboxes.push({
+      kind: 'door', x: g.door.x - 20, y: g.door.y - 10, w: 30, h: g.door.h + 20,
+    });
+
+    // Whoever is in the air, drawn last so they are over everything.
+    if (this.drag?.moved) this._drawDragged(ctx, now);
+
+    // blit
+    const out = this.ctx;
+    out.imageSmoothingEnabled = false;
+    out.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    out.drawImage(this.bb, 0, 0, w, h, 0, 0, w * this.scale, h * this.scale);
+
+    this._syncPlates(g);
+    this._syncWinPlates(g.showWin ? g : { win: { pods: [], loose: [] } });
+    this._syncGroupPlates(g.showWin ? g : { win: { pods: [] } });
+    // With one zone there is nothing to tell apart, so the signs come down.
+    const signY = (WALL_TOP - 8) * this.scale;
+    this.zoneLabels[0].hidden = !g.showWin;
+    this.zoneLabels[0].style.transform =
+      `translate(${(g.ai.x + g.ai.w / 2) * this.scale}px, ${signY}px) translate(-50%, -100%)`;
+    this.zoneLabels[1].hidden = !g.showWin;
+    this.zoneLabels[1].style.transform =
+      `translate(${(g.win.x + g.win.w / 2) * this.scale}px, ${signY}px) translate(-50%, -100%)`;
+  }
+
+  _drawCrew(ctx, g, now) {
+    const bySeat = new Map(this.state.crew.map((p) => [p.seat, p]));
+    for (const a of g.ai.cells) {
+      const person = bySeat.get(a.seat) ?? null;
+      rug(ctx, a.x + 6, a.y + RUG_TOP, CELL_W - 12, RUG_H, RUGS[a.seat % RUGS.length]);
 
       if (!person) {
         chair(ctx, a.cx, a.standY + 4, '#5a5f6e');
-        emptyDesk(ctx, a.cx, a.deskY, { hover: this.hoverSeat === seat });
-        this.hitboxes.push({ seat, person: null, x: a.x, y: a.y, w: CELL_W, h: CELL_H });
+        emptyDesk(ctx, a.cx, a.deskY, { hover: this.hoverSeat === a.seat });
+        this.hitboxes.push({ kind: 'seat', seat: a.seat, person: null, x: a.x, y: a.y, w: CELL_W, h: CELL_H });
         continue;
       }
 
-      this._drawPerson(ctx, person, a, now);
-      this.hitboxes.push({ seat, person, x: a.x, y: a.y, w: CELL_W, h: CELL_H });
+      const leaving = this._leaveProgress(person, now);
+      // Once they are on their feet the desk is empty; the walk is drawn on top
+      // of the whole room, not clipped to this cell.
+      this._drawPerson(ctx, person, a, now, leaving);
+      this.hitboxes.push({ kind: 'seat', seat: a.seat, person, x: a.x, y: a.y, w: CELL_W, h: CELL_H });
+    }
+    // Anyone mid-walk crosses zones, so they go after every desk is down.
+    for (const person of this.state.crew) {
+      const leaving = this._leaveProgress(person, now);
+      if (leaving?.phase === 'walk' || leaving?.phase === 'gone') {
+        this._drawWalkOut(ctx, g, person, leaving, now);
+      }
     }
 
-    // Press highlight, drawn last so it sits over whoever is in the seat.
-    if (this.pressSeat !== null) {
-      const a = this._seatAnchor(this.pressSeat, layout);
-      px(ctx, a.x + 6, a.y + RUG_TOP, CELL_W - 12, RUG_H, '#ffffff14');
+    // Press highlight, drawn over whoever is in the seat.
+    if (this.pressSeat !== null && !this.drag?.moved) {
+      const a = g.ai.cells.find((c) => c.seat === this.pressSeat);
+      if (a) px(ctx, a.x + 6, a.y + RUG_TOP, CELL_W - 12, RUG_H, '#ffffff14');
     }
-
-    // blit
-    const g = this.ctx;
-    g.imageSmoothingEnabled = false;
-    g.clearRect(0, 0, this.canvas.width, this.canvas.height);
-    g.drawImage(this.bb, 0, 0, w, h, 0, 0, w * this.scale, h * this.scale);
-
-    this._syncPlates(layout);
   }
 
-  _drawPerson(ctx, person, a, now) {
+  /** null unless this person is on their way out; otherwise where in it they are. */
+  _leaveProgress(person, now) {
+    if (person.state !== 'leaving') {
+      this.leaveClock.delete(person.id);
+      return null;
+    }
+    let t0 = this.leaveClock.get(person.id);
+    if (t0 === undefined) {
+      t0 = now;
+      this.leaveClock.set(person.id, t0);
+    }
+    const t = now - t0;
+    if (t < CRY_MS) return { phase: 'cry', t, k: t / CRY_MS };
+    if (t < CRY_MS + PACK_MS) return { phase: 'pack', t, k: (t - CRY_MS) / PACK_MS };
+    if (t < CRY_MS + PACK_MS + WALK_MS) return { phase: 'walk', t, k: (t - CRY_MS - PACK_MS) / WALK_MS };
+    return { phase: 'gone', t, k: Math.min(1, (t - CRY_MS - PACK_MS - WALK_MS) / FADE_MS) };
+  }
+
+  _drawPerson(ctx, person, a, now, leaving) {
     const av = avatarOf(person.seed, person.sprite);
     const look = LOOK[person.state] ?? LOOK.idle;
     const t = now / 1000 + av.phase * 6;
     const working = person.state === 'working';
     const sleeping = person.state === 'sleeping';
+    const dragging = this.drag?.moved && this.drag.kind === 'crew' && this.drag.id === person.id;
 
     const patted = this.pat.id === person.id && now < this.pat.until;
     const ruffle = this.pat.id === person.id && now < this.pat.ruffleUntil
@@ -201,16 +500,46 @@ export class Office {
 
     chair(ctx, a.cx, a.standY + 4, '#454c5e');
 
-    const bob = sleeping ? 2 : Math.sin(t * (working ? 3.2 : 1.4)) * (working ? 0.8 : 0.5);
-    const blink = !sleeping && Math.sin(t * 0.9 + av.phase * 10) > 0.985;
-    const headY = character(ctx, a.cx, a.standY, av, {
-      bob,
-      blink: blink || sleeping,
-      typing: working ? t * 7 : 0,
-      alpha: person.state === 'exited' ? 0.45 : 1,
-      patted,
-      ruffle,
-    });
+    // Off walking, or held in the air — either way not at this desk any more.
+    const atDesk = !leaving || leaving.phase === 'cry' || leaving.phase === 'pack';
+    if (atDesk && !dragging) {
+      const crying = !!leaving;
+      // Sobbing is a shake, not a bob — a different rhythm from breathing.
+      const bob = crying
+        ? Math.sin(t * 9) * 0.9
+        : sleeping ? 2 : Math.sin(t * (working ? 3.2 : 1.4)) * (working ? 0.8 : 0.5);
+      const blink = !sleeping && Math.sin(t * 0.9 + av.phase * 10) > 0.985;
+      const headY = character(ctx, a.cx, a.standY, av, {
+        bob,
+        blink: blink || sleeping,
+        typing: working && !crying ? t * 7 : 0,
+        alpha: person.state === 'exited' ? 0.45 : 1,
+        patted: patted && !crying,
+        ruffle,
+        crying,
+        droop: crying ? 1 : 0,
+        step: crying ? t * 9 : 0,
+      });
+
+      // The box fills up on the desk while they pack, before it is picked up.
+      if (leaving?.phase === 'pack') {
+        this._packBox(ctx, a.cx - 24, a.deskY - 32, leaving.k);
+      }
+
+      if (person.state === 'awaiting_approval') {
+        bubble(ctx, a.cx + 16, headY + 2, '!', '#fff1ef', '#c9402c');
+      } else if (sleeping) {
+        const k = Math.floor(now / 700) % 3;
+        ctx.save();
+        ctx.globalAlpha = 0.75;
+        for (let i = 0; i <= k; i += 1) {
+          px(ctx, a.cx + 9 + i * 3, headY - 2 - i * 4, 2, 2, '#5f6879');
+        }
+        ctx.restore();
+      } else if (person.state === 'exited') {
+        bubble(ctx, a.cx + 16, headY + 2, '×', '#efeae2', '#6b6257');
+      }
+    }
 
     desk(ctx, a.cx, a.deskY, {
       screen: look.screen,
@@ -218,21 +547,6 @@ export class Office {
       scan: look.scan ? (now / 60) % 15 : 0,
       lamp: look.lamp && Math.floor(now / 500) % 2 === 0 ? look.lamp : null,
     });
-
-    // status bubbles beside the head
-    if (person.state === 'awaiting_approval') {
-      bubble(ctx, a.cx + 16, headY + 2, '!', '#fff1ef', '#c9402c');
-    } else if (sleeping) {
-      const k = Math.floor(now / 700) % 3;
-      ctx.save();
-      ctx.globalAlpha = 0.75;
-      for (let i = 0; i <= k; i += 1) {
-        px(ctx, a.cx + 9 + i * 3, headY - 2 - i * 4, 2, 2, '#5f6879');
-      }
-      ctx.restore();
-    } else if (person.state === 'exited') {
-      bubble(ctx, a.cx + 16, headY + 2, '×', '#efeae2', '#6b6257');
-    }
 
     if (person.watch) {
       // a small eye above the monitor: this person shows their browser work
@@ -252,11 +566,167 @@ export class Office {
     }
   }
 
+  /** A box on the desk taking shape, one flap at a time. */
+  _packBox(ctx, x, y, k) {
+    const w = 16;
+    const h = Math.max(2, Math.round(11 * Math.min(1, k * 1.4)));
+    px(ctx, x, y - h, w, h, '#b98a58');
+    px(ctx, x, y - h, w, 2, '#cf9f6a');
+    px(ctx, x + 7, y - h, 2, h, '#e0cba4');
+    if (k > 0.55) px(ctx, x - 3, y - h - 3, 22, 3, '#a9764a'); // flaps folded over
+  }
+
+  /**
+   * Out the door: down into the corridor, right along it, and through.
+   * A person leaving does not cut diagonally across other people's desks, and
+   * seeing them take the long way round is most of what sells it.
+   */
+  _walkPath(g, seat) {
+    const drop = { x: seat.cx, y: g.corridorY };
+    const along = { x: g.door.cx - 8, y: g.corridorY };
+    const out = { x: g.door.x + 14, y: g.corridorY };
+    const legs = [
+      { from: { x: seat.cx, y: seat.standY + 6 }, to: drop },
+      { from: drop, to: along },
+      { from: along, to: out },
+    ];
+    const lengths = legs.map((l) => Math.hypot(l.to.x - l.from.x, l.to.y - l.from.y));
+    return { legs, lengths, total: lengths.reduce((a, b) => a + b, 0) || 1 };
+  }
+
+  _drawWalkOut(ctx, g, person, leaving, now) {
+    const seat = g.ai.cells.find((c) => c.seat === person.seat);
+    if (!seat) return;
+    const path = this._walkPath(g, seat);
+    // Ease out at the end so the last step is a slow one through the doorway.
+    const k = leaving.phase === 'gone' ? 1 : leaving.k;
+    let travelled = k * path.total;
+    let pos = path.legs[path.legs.length - 1].to;
+    for (let i = 0; i < path.legs.length; i += 1) {
+      if (travelled > path.lengths[i]) { travelled -= path.lengths[i]; continue; }
+      const l = path.legs[i];
+      const f = path.lengths[i] ? travelled / path.lengths[i] : 1;
+      pos = { x: l.from.x + (l.to.x - l.from.x) * f, y: l.from.y + (l.to.y - l.from.y) * f };
+      break;
+    }
+
+    const av = avatarOf(person.seed, person.sprite);
+    // 터벅터벅: a slow cadence with a heavy landing, not a walk cycle.
+    const cadence = (now / 1000) * 4.4;
+    const alpha = leaving.phase === 'gone' ? Math.max(0, 1 - leaving.k) : 1;
+    character(ctx, Math.round(pos.x), Math.round(pos.y), av, {
+      alpha,
+      step: cadence,
+      droop: 1,
+      carry: 1,
+      crying: leaving.k < 0.45,
+      blink: leaving.k >= 0.45,
+      bob: Math.max(0, Math.sin(cadence)) * -0.8,
+    });
+  }
+
+  // ── the windows zone ──────────────────────────────────────────────────────
+  _drawWindows(ctx, g, now) {
+    const over = (this.drag?.kind === 'win' ? this.drag.over : null) ?? this.dropHint;
+
+    // Hit testing runs back to front, so the order these go in *is* the
+    // stacking order: the zone is under the tables, and the tables are under
+    // the people sitting at them.
+    // Empty floor in this zone is a drop target too — it makes a new table.
+    this.hitboxes.push({
+      kind: 'zone', zone: 'windows', x: g.win.x - 6, y: g.win.y - 6, w: g.win.w + 12, h: g.zoneH + 10,
+    });
+
+    for (const pod of g.win.pods) {
+      this.hitboxes.push({
+        kind: 'pod', groupId: pod.group.id,
+        x: pod.cx - POD_W / 2 + 6, y: pod.cy - POD_H / 2 + 6, w: POD_W - 12, h: POD_H - 12,
+      });
+      if (over === pod.group.id) {
+        ctx.save();
+        ctx.globalAlpha = 0.16;
+        px(ctx, pod.cx - POD_W / 2 + 8, pod.cy - POD_H / 2 + 10, POD_W - 16, POD_H - 20, '#f0b45a');
+        ctx.restore();
+      }
+      roundTable(ctx, pod.cx, pod.cy, Math.round(pod.r * 0.48), TABLES[hash(pod.group.id) % TABLES.length]);
+      for (const s of pod.seats) this._drawWindowPerson(ctx, s.person, s.x, s.y, now);
+    }
+
+    if (g.win.hasLoose) {
+      const y = g.win.looseTop;
+      const h = g.win.y + g.win.h - y;
+      if (over === 'loose') {
+        ctx.save();
+        ctx.globalAlpha = 0.12;
+        px(ctx, g.win.x + 4, y - 4, g.win.w - 8, h, '#f0b45a');
+        ctx.restore();
+      }
+      px(ctx, g.win.x + 4, y - 5, g.win.w - 8, 1, '#ffffff12');
+      for (const s of g.win.loose) this._drawWindowPerson(ctx, s.person, s.x, s.y, now);
+    }
+  }
+
+  _drawWindowPerson(ctx, person, x, y, now) {
+    if (!person) return;
+    const dragging = this.drag?.moved && this.drag.kind === 'win' && this.drag.key === person.key;
+    if (dragging) return;
+    const av = avatarOf(hash(person.key), '');
+    const t = now / 1000 + av.phase * 6;
+    // Minimized is asleep: the window is still yours, it just is not on screen.
+    const asleep = person.minimized;
+    character(ctx, Math.round(x), Math.round(y), av, {
+      bob: asleep ? 2 : Math.sin(t * 1.3) * 0.5,
+      blink: asleep || Math.sin(t * 0.9 + av.phase * 10) > 0.985,
+      alpha: asleep ? 0.5 : 1,
+      badge: appColor(person.app),
+      droop: asleep ? 1 : 0,
+    });
+    if (person.active) {
+      // the one tab actually in front right now
+      px(ctx, Math.round(x) - 1, Math.round(y) - 34, 3, 3, '#f0b45a');
+    }
+    this.hitboxes.push({ kind: 'win', person, x: x - 10, y: y - 32, w: 20, h: 34 });
+  }
+
+  /** Whoever the pointer is carrying, drawn at the cursor. */
+  _drawDragged(ctx, now) {
+    const d = this.drag;
+    const t = now / 1000;
+    if (d.kind === 'crew') {
+      const person = this.state.crew.find((p) => p.id === d.id);
+      if (!person) return;
+      const av = avatarOf(person.seed, person.sprite);
+      // Held up by the scruff: feet dangling, arms out.
+      character(ctx, Math.round(d.x), Math.round(d.y + 14), av, {
+        bob: Math.sin(t * 8) * 1.2,
+        step: t * 7,
+        armLift: 0.5,
+        crying: d.over === 'door',
+      });
+      return;
+    }
+    const person = this.windowPeople.find((p) => p.key === d.key);
+    if (!person) return;
+    character(ctx, Math.round(d.x), Math.round(d.y + 12), avatarOf(hash(person.key), ''), {
+      bob: Math.sin(t * 8) * 1.2,
+      step: t * 7,
+      badge: appColor(person.app),
+    });
+  }
+
   // ── DOM nameplates ────────────────────────────────────────────────────────
-  _syncPlates(layout) {
+  _syncPlates(g) {
     const seen = new Set();
     for (const person of this.state.crew) {
+      const a = g.ai.cells.find((c) => c.seat === person.seat);
+      if (!a) continue;
+      // Once they are walking the plate would trail them across the room; the
+      // activity log carries it from here.
+      const leaving = person.state === 'leaving'
+        && (performance.now() - (this.leaveClock.get(person.id) ?? performance.now())) > CRY_MS + PACK_MS;
+      if (leaving) continue;
       seen.add(person.id);
+
       let plate = this.plates.get(person.id);
       if (!plate) {
         plate = document.createElement('div');
@@ -269,7 +739,6 @@ export class Office {
         this.plateHost.appendChild(plate);
         this.plates.set(person.id, plate);
       }
-      const a = this._seatAnchor(person.seat, layout);
       // Anchor the plate's bottom-centre just above the tallest headpiece
       // (rabbit ears and the wizard hat both reach ~18px over the head).
       const y = (a.standY - 48) * this.scale;
@@ -280,16 +749,17 @@ export class Office {
       const name = `${person.name}`;
       if (plate.querySelector('b').textContent !== name) plate.querySelector('b').textContent = name;
 
-      const cap = person.caption || person.personaLabel || '';
+      const cap = person.state === 'leaving' ? '짐 싸는 중' : (person.caption || person.personaLabel || '');
       const capEl = plate.querySelector('.cap');
       if (capEl.textContent !== cap) capEl.textContent = cap;
-      capEl.classList.toggle('job', !!person.jobName);
+      capEl.classList.toggle('job', !!person.jobName && person.state !== 'leaving');
 
       const chips = [];
       const s = person.session;
-      if (person.approvalCount) chips.push(`승인 ${person.approvalCount}건`);
+      if (person.state === 'leaving') chips.push('인수인계 중');
+      else if (person.approvalCount) chips.push(`승인 ${person.approvalCount}건`);
       else if (s?.currentTool) chips.push(`▶ ${s.currentTool}`);
-      if (person.trusted) chips.push('알아서');
+      if (person.trusted && person.state !== 'leaving') chips.push('알아서');
       if (person.watch) chips.push('지켜보는 중');
       if (person.state === 'exited') chips.push('종료됨');
       const chipEl = plate.querySelector('.chips');
@@ -304,30 +774,126 @@ export class Office {
     }
   }
 
+  _syncWinPlates(g) {
+    const seen = new Set();
+    const place = (person, x, y, below, lane = 0) => {
+      seen.add(person.key);
+      let plate = this.winPlates.get(person.key);
+      if (!plate) {
+        plate = document.createElement('div');
+        plate.className = 'wplate';
+        plate.innerHTML = '<b></b>';
+        plate.title = '';
+        plate.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.onWindowClick(person.key);
+        });
+        this.plateHost.appendChild(plate);
+        this.winPlates.set(person.key, plate);
+      }
+      // Above the head, or below the feet for the front of a circle — the ring
+      // would otherwise stack every label on top of the person behind.
+      const lift = lane * 14;
+      const ty = (below ? y + 8 + lift : y - 32 - lift) * this.scale;
+      plate.style.transform = `translate(${x * this.scale}px, ${ty}px) translate(-50%, ${below ? '0' : '-100%'})`;
+      plate.classList.toggle('dim', !!person.minimized);
+      plate.classList.toggle('active', !!person.active);
+      const b = plate.querySelector('b');
+      if (b.textContent !== person.name) b.textContent = person.name;
+      const title = `${person.name} · ${person.app}`;
+      if (plate.title !== title) plate.title = title;
+    };
+
+    for (const pod of g.win.pods) {
+      for (const s of pod.seats) place(s.person, s.x, s.y, s.y > pod.cy, s.lane);
+    }
+    // The waiting area is a dense row, so its labels alternate above and below
+    // the heads rather than sharing one line.
+    g.win.loose.forEach((s, i) => place(s.person, s.x, s.y, i % 2 === 1));
+
+    for (const [key, el] of this.winPlates) {
+      if (seen.has(key)) continue;
+      el.remove();
+      this.winPlates.delete(key);
+    }
+  }
+
+  /** A group's name and its one button, under its table. */
+  _syncGroupPlates(g) {
+    const seen = new Set();
+    for (const pod of g.win.pods) {
+      const id = pod.group.id;
+      seen.add(id);
+      let plate = this.groupPlates.get(id);
+      if (!plate) {
+        plate = document.createElement('div');
+        plate.className = 'gplate';
+        plate.innerHTML = '<b></b><button type="button" class="tiny"></button>';
+        plate.querySelector('b').addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.onGroupRename(id);
+        });
+        plate.querySelector('button').addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.onGroupToggle(id);
+        });
+        this.plateHost.appendChild(plate);
+        this.groupPlates.set(id, plate);
+      }
+      // Clear of the front row's own labels, which hang below their feet.
+      const y = (pod.cy + pod.r * 0.7 + 28) * this.scale;
+      plate.style.transform = `translate(${pod.cx * this.scale}px, ${y}px) translate(-50%, 0)`;
+      plate.classList.toggle(
+        'drop',
+        (this.drag?.kind === 'win' && this.drag.over === id) || this.dropHint === id,
+      );
+
+      const b = plate.querySelector('b');
+      const label = `${pod.group.name} · ${pod.members.length}`;
+      if (b.textContent !== label) b.textContent = label;
+      const btn = plate.querySelector('button');
+      const want = pod.group.hidden ? '열기' : '숨기기';
+      if (btn.textContent !== want) btn.textContent = want;
+      btn.disabled = pod.members.length === 0;
+    }
+    for (const [id, el] of this.groupPlates) {
+      if (seen.has(id)) continue;
+      el.remove();
+      this.groupPlates.delete(id);
+    }
+  }
+
   // ── input ─────────────────────────────────────────────────────────────────
   _toBuffer(e) {
     const r = this.canvas.getBoundingClientRect();
     return { x: (e.clientX - r.left) / this.scale, y: (e.clientY - r.top) / this.scale };
   }
 
-  _hit(p) {
-    return this.hitboxes.find((b) => p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h) ?? null;
+  /** Topmost first: people are pushed after the zone they stand in. */
+  _hit(p, kinds = null) {
+    for (let i = this.hitboxes.length - 1; i >= 0; i -= 1) {
+      const b = this.hitboxes[i];
+      if (kinds && !kinds.includes(b.kind)) continue;
+      if (p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h) return b;
+    }
+    return null;
   }
 
-  /** Which seat is under a page coordinate — used as a drop target for job cards. */
-  hitAtClient(clientX, clientY) {
+  /** Which seat is under a page coordinate — used as a drop target for cards. */
+  hitAtClient(clientX, clientY, kinds = null) {
     const r = this.canvas.getBoundingClientRect();
-    return this._hit({ x: (clientX - r.left) / this.scale, y: (clientY - r.top) / this.scale });
+    return this._hit({ x: (clientX - r.left) / this.scale, y: (clientY - r.top) / this.scale }, kinds);
   }
 
-  _onMove(e) {
+  _onHover(e) {
+    if (this.drag) return;
     const p = this._toBuffer(e);
     const hit = this._hit(p);
-    this.hoverSeat = hit && !hit.person ? hit.seat : null;
-    this.canvas.style.cursor = hit ? 'pointer' : 'default';
+    this.hoverSeat = hit?.kind === 'seat' && !hit.person ? hit.seat : null;
+    this.canvas.style.cursor = hit && hit.kind !== 'zone' ? 'pointer' : 'default';
 
     // Head-patting easter egg: rub back and forth over someone's head.
-    if (!hit?.person) return;
+    if (hit?.kind !== 'seat' || !hit.person) return;
     const dir = Math.sign(e.movementX);
     if (!dir) return;
     const overHead = p.y < hit.y + 52;
@@ -348,12 +914,85 @@ export class Office {
     }
   }
 
-  _onClick(e) {
-    const hit = this._hit(this._toBuffer(e));
+  /**
+   * One gesture handles selecting and dragging. Which it was is decided on the
+   * way up: below the 8px threshold it was a tap, above it the person was
+   * picked up and the tap never happens.
+   */
+  _onDown(e) {
+    if (e.button !== 0) return;
+    const p = this._toBuffer(e);
+    const hit = this._hit(p);
+    this.pressSeat = hit?.kind === 'seat' ? hit.seat : null;
+    if (!hit) { this.press = null; return; }
+
+    this.press = { hit, x0: e.clientX, y0: e.clientY, pointerId: e.pointerId };
+    // A person leaving is already gone as far as the pointer is concerned.
+    if (hit.kind === 'seat' && hit.person && hit.person.state !== 'leaving') {
+      this.press.draggable = { kind: 'crew', id: hit.person.id };
+    } else if (hit.kind === 'win') {
+      this.press.draggable = { kind: 'win', key: hit.person.key };
+    }
+  }
+
+  _onMove(e) {
+    if (!this.press) return;
+    const moved = Math.hypot(e.clientX - this.press.x0, e.clientY - this.press.y0);
+    if (!this.drag) {
+      if (!this.press.draggable || moved < 8) return;
+      this.drag = { ...this.press.draggable, moved: true, over: null, x: 0, y: 0 };
+      this.pressSeat = null;
+      try { this.canvas.setPointerCapture(this.press.pointerId); } catch { /* not captured */ }
+      this.canvas.style.cursor = 'grabbing';
+    }
+    const p = this._toBuffer(e);
+    this.drag.x = p.x;
+    this.drag.y = p.y;
+    this.drag.over = this._dropTarget(p);
+  }
+
+  _dropTarget(p) {
+    if (this.drag.kind === 'crew') {
+      return this._hit(p, ['door']) ? 'door' : null;
+    }
+    const pod = this._hit(p, ['pod']);
+    if (pod) return pod.groupId;
+    const zone = this._hit(p, ['zone']);
+    if (!zone) return null;
+    const geom = this.geom;
+    // Below the tables is the waiting area — dropping there means "not part of
+    // any of this".
+    if (geom?.win.hasLoose && p.y > geom.win.looseTop - 6) return 'loose';
+    return 'new';
+  }
+
+  _onUp(e) {
+    const press = this.press;
+    const drag = this.drag;
+    this.press = null;
+    this.drag = null;
     this.pressSeat = null;
-    if (!hit) return;
-    if (hit.person) this.onPersonClick(hit.person.id);
-    // The sheet grows out of the desk that was clicked, so pass where it was.
-    else this.onSeatClick(hit.seat, { x: e.clientX, y: e.clientY });
+    this.canvas.style.cursor = 'default';
+    try { this.canvas.releasePointerCapture(e.pointerId); } catch { /* never captured */ }
+    if (!press) return;
+
+    if (drag) {
+      const target = drag.over;
+      if (drag.kind === 'crew' && target === 'door') this.onDropAtDoor(drag.id);
+      if (drag.kind === 'win' && target) {
+        this.onWindowDrop(drag.key, target === 'loose' ? null : target);
+      }
+      return;
+    }
+
+    // A tap.
+    const hit = press.hit;
+    if (hit.kind === 'seat') {
+      if (hit.person) this.onPersonClick(hit.person.id);
+      // The sheet grows out of the desk that was clicked, so pass where it was.
+      else this.onSeatClick(hit.seat, { x: e.clientX, y: e.clientY });
+    } else if (hit.kind === 'win') {
+      this.onWindowClick(hit.person.key);
+    }
   }
 }

@@ -13,6 +13,8 @@ import { handle as handleMcp, personIdForToken } from './mcpServer.js';
 import * as approvals from './approvals.js';
 import { updateStatus, checkForUpdate, applyUpdate } from './update.js';
 import { toolboxStatus } from './toolbox.js';
+import { desktopState, focusPerson, refreshDesktop } from './desktop.js';
+import * as groups from './groups.js';
 
 const WEB_DIR = path.join(ROOT, 'web');
 const MIME = {
@@ -56,6 +58,13 @@ bus.on('approvals', (a) => broadcast('approvals', a));
 bus.on('approval-resolved', (a) => broadcast('approval-resolved', a));
 bus.on('update', (u) => broadcast('update', u));
 bus.on('toolbox', (t) => broadcast('toolbox', t));
+// 대화창이 '생각 중 → 도구 → 답변' 을 그릴 수 있게 하는 신호들.
+// 이 컴퓨터에 열려 있는 창들, 그리고 그 창들을 묶은 그룹.
+bus.on('desktop', (d) => broadcast('desktop', d));
+bus.on('groups', (g) => broadcast('groups', g));
+bus.on('phase', (p) => broadcast('phase', p));
+bus.on('tool', (t) => broadcast('tool', t));
+bus.on('turn-end', (t) => broadcast('turn-end', t));
 
 function json(res, status, body) {
   res.writeHead(status, {
@@ -112,6 +121,8 @@ function fullState() {
     approvalHistory: approvals.approvalHistory(),
     update: updateStatus(),
     toolbox: toolboxStatus(),
+    desktop: desktopState(),
+    groups: groups.listGroups(),
     activity: recentActivity(),
     system: systemStats(),
     usage: usageReport(),
@@ -240,6 +251,14 @@ export function createServer() {
       if (!sub && req.method === 'DELETE') {
         return json(res, 200, { ok: crew.fire(id) });
       }
+
+      // Dragged to the door. Answer at once — the office starts the walk out
+      // from the `leaving` state, and the handover behind it takes as long as
+      // it takes.
+      if (sub === 'leave' && req.method === 'POST') {
+        crew.leave(id).catch(() => {});
+        return json(res, 200, { ok: true });
+      }
       if (!sub) return json(res, 200, person.toJSON());
 
       if (sub === 'send' && req.method === 'POST') {
@@ -278,6 +297,54 @@ export function createServer() {
         const swallowed = approvals.setTrusted(id, body.on === true);
         crew.touch(id);
         return json(res, 200, { ok: true, on: approvals.isTrusted(id), resolved: swallowed });
+      }
+    }
+
+    // ---- this computer's own windows ---------------------------------------
+    if (p === '/api/desktop') {
+      if (req.method === 'POST') await refreshDesktop();
+      return json(res, 200, { ...desktopState(), groups: groups.listGroups() });
+    }
+
+    // Click a window-person: bring that window (and, for a browser, that exact
+    // tab) to the front.
+    if (p === '/api/desktop/focus' && req.method === 'POST') {
+      const body = await readBody(req);
+      const person = desktopState().people.find((x) => x.key === body.key);
+      if (!person) return json(res, 404, { ok: false, error: 'unknown window' });
+      const r = await focusPerson(person);
+      return json(res, 200, { ok: !!r?.ok });
+    }
+
+    // Drag a window-person onto a table — or off every table with groupId null.
+    if (p === '/api/desktop/assign' && req.method === 'POST') {
+      const body = await readBody(req);
+      const key = String(body.key ?? '');
+      const groupId = body.groupId ? String(body.groupId) : null;
+      return json(res, 200, { ok: groups.assign(key, groupId) });
+    }
+
+    if (p === '/api/desktop/groups' && req.method === 'POST') {
+      const body = await readBody(req);
+      const group = groups.createGroup(body.name);
+      // Creating a group by dropping a person on empty floor seats them at once.
+      if (body.key) groups.assign(String(body.key), group.id);
+      return json(res, 200, { ok: true, group });
+    }
+
+    if (p.startsWith('/api/desktop/groups/')) {
+      const [, , , , id, action] = p.split('/');
+      if (!action && (req.method === 'POST' || req.method === 'PATCH')) {
+        const body = await readBody(req);
+        const group = groups.renameGroup(id, body.name);
+        return json(res, group ? 200 : 404, { ok: !!group, group });
+      }
+      if (!action && req.method === 'DELETE') {
+        return json(res, 200, { ok: groups.deleteGroup(id) });
+      }
+      if (req.method === 'POST' && ['open', 'hide', 'toggle'].includes(action)) {
+        const fn = { open: groups.openGroup, hide: groups.hideGroup, toggle: groups.toggleGroup }[action];
+        return json(res, 200, await fn(id));
       }
     }
 

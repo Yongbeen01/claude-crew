@@ -27,6 +27,13 @@ const history = [];
  * it by accident.
  */
 const trusted = new Set();
+/**
+ * People on their way out. Their last turn is a handover — a statement, not
+ * work — so any tool it reaches for is refused immediately instead of hanging
+ * on a card nobody is going to press. Without this, one stray Write during the
+ * handover parks the whole departure forever: holds have no timeout by design.
+ */
+const leaving = new Set();
 
 let viewerCount = 0;
 
@@ -70,8 +77,16 @@ export function setTrusted(personId, on) {
   return n;
 }
 
+/** Nothing this person asks for from now on waits for a click. */
+export function setLeaving(personId) {
+  if (!personId) return 0;
+  leaving.add(personId);
+  return resolveAllFor(personId, 'deny', 'leaving');
+}
+
 export function forget(personId) {
   trusted.delete(personId);
+  leaving.delete(personId);
   resolveAllFor(personId, config.approvalFallbackDecision, 'gone');
 }
 
@@ -115,6 +130,9 @@ export function requestApproval(personId, payload) {
   const input = payload.tool_input ?? {};
 
   if (isAutoAllowed(tool)) return { held: false, decision: 'allow' };
+
+  // Already walking to the door — the handover is words, not work.
+  if (personId && leaving.has(personId)) return { held: false, decision: 'deny' };
 
   if (personId && trusted.has(personId)) {
     logActivity('trust', `자동 승인 · ${describeTool(tool, input)}`, personId, { decision: 'allow' });

@@ -70,6 +70,26 @@ const DEFAULTS = {
   summaryTimeoutMs: 45_000,
   summaryConcurrency: 2,
 
+  /**
+   * Leaving. A person on the way out is asked what the next one should know,
+   * and the answer is filed into the job's instructions and this type's skills.
+   * The walk to the door is the wait — hence a floor, so the animation is never
+   * cut short by a fast answer.
+   */
+  handover: true,
+  handoverModel: 'sonnet',
+  handoverTimeoutMs: 120_000,
+  /** the crying / packing / trudging choreography, start to door */
+  leaveAnimMs: 9200,
+
+  /**
+   * The windows zone: everything you have open, drawn as people. Windows only —
+   * there is no equivalent enumeration on the other platforms, and the office
+   * simply shows one zone there.
+   */
+  desktop: true,
+  desktopPollMs: 3500,
+
   /** remaining-limit panel, read via `claude -p /usage` (no credential file access) */
   usage: true,
   usagePollMs: 5 * 60 * 1000,

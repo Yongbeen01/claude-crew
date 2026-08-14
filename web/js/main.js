@@ -1,6 +1,7 @@
 import { Office } from './office.js';
 import { avatarOf, character } from './sprites.js';
 import { spring, spring2d, project, VelocityTracker } from './motion.js';
+import { renderMarkdown } from './markdown.js';
 
 /**
  * Store + SSE wiring + render loop.
@@ -19,11 +20,21 @@ const store = {
   tasks: { tasks: [], timer: null },
   system: null,
   usage: null,
+  /** everything open on this PC, one person per window or browser tab */
+  desktop: { supported: true, people: [] },
+  groups: [],
   meta: { maxSeats: 4 },
   /** personId -> [{role, text, at}] */
   chats: new Map(),
   /** personId -> partial assistant text */
   streaming: new Map(),
+  /**
+   * personId -> what the person is doing this turn. Everything in here is
+   * temporary: the chat shows it while the work happens and throws it away when
+   * the answer lands, so the conversation keeps only the answers.
+   * {phase, startedAt, tools:[], notes:[], toolsOpen}
+   */
+  work: new Map(),
   selectedId: null,
 };
 window.__store = store; // handy for the Playwright checks
@@ -73,6 +84,13 @@ const el = {
   updateApply: document.getElementById('update-apply'),
   updateHide: document.getElementById('update-hide'),
   dragLayer: document.getElementById('drag-layer'),
+  windowsPanel: document.getElementById('windows-panel'),
+  windowsSummary: document.getElementById('windows-summary'),
+  groupNew: document.getElementById('group-new'),
+  leave: document.getElementById('leave'),
+  leaveWho: document.getElementById('leave-who'),
+  leaveYes: document.getElementById('leave-yes'),
+  leaveNo: document.getElementById('leave-no'),
 };
 
 const office = new Office(el.office, el.plates);
@@ -80,6 +98,34 @@ window.__office = office;
 
 office.onSeatClick = (seat, at) => openHire(at);
 office.onPersonClick = (id) => select(id);
+
+// Dragged to the door. Nothing has happened yet — the question is asked first,
+// and it is a real question.
+office.onDropAtDoor = (id) => askToLeave(id);
+
+// A window-person. Clicking brings that exact window (and tab) to the front;
+// dragging moves them between tables.
+office.onWindowClick = (key) => api('/api/desktop/focus', { method: 'POST', body: { key } });
+office.onWindowDrop = async (key, target) => {
+  if (target === 'new') {
+    const name = prompt('새 그룹 이름', '새 그룹');
+    if (!name?.trim()) return;
+    await api('/api/desktop/groups', { method: 'POST', body: { name: name.trim(), key } });
+    return;
+  }
+  await api('/api/desktop/assign', { method: 'POST', body: { key, groupId: target } });
+};
+office.onGroupToggle = (id) => api(`/api/desktop/groups/${id}/toggle`, { method: 'POST' });
+office.onGroupRename = async (id) => {
+  const group = store.groups.find((g) => g.id === id);
+  const name = prompt('그룹 이름 (비우면 그룹을 없앱니다)', group?.name ?? '');
+  if (name === null) return;
+  if (!name.trim()) {
+    await api(`/api/desktop/groups/${id}`, { method: 'DELETE' });
+    return;
+  }
+  await api(`/api/desktop/groups/${id}`, { method: 'POST', body: { name: name.trim() } });
+};
 
 // ── api ──────────────────────────────────────────────────────────────────
 async function api(path, opts = {}) {
@@ -100,7 +146,7 @@ function connect() {
     Object.assign(store, {
       crew: s.crew, personas: s.personas, activity: s.activity, approvals: s.approvals,
       jobs: s.jobs, tasks: s.tasks, system: s.system, usage: s.usage, meta: s.meta,
-      update: s.update,
+      update: s.update, desktop: s.desktop ?? store.desktop, groups: s.groups ?? [],
     });
     el.version.textContent = `v${s.meta?.version ?? ''}`;
     renderAll();
@@ -109,6 +155,8 @@ function connect() {
   es.addEventListener('crew', (e) => { store.crew = JSON.parse(e.data); renderCrew(); });
   es.addEventListener('update', (e) => { store.update = JSON.parse(e.data); renderUpdate(); });
   es.addEventListener('approvals', (e) => { store.approvals = JSON.parse(e.data); renderApprovals(); });
+  es.addEventListener('desktop', (e) => { store.desktop = JSON.parse(e.data); renderWindows(); });
+  es.addEventListener('groups', (e) => { store.groups = JSON.parse(e.data); renderWindows(); });
   es.addEventListener('jobs', (e) => { store.jobs = JSON.parse(e.data); renderJobs(); });
   es.addEventListener('tasks', (e) => { store.tasks = JSON.parse(e.data); renderTasks(); });
   es.addEventListener('personas', (e) => { store.personas = JSON.parse(e.data); });
@@ -123,19 +171,63 @@ function connect() {
   es.addEventListener('delta', (e) => {
     const { personId, text } = JSON.parse(e.data);
     store.streaming.set(personId, (store.streaming.get(personId) ?? '') + text);
+    workOf(personId);
+    if (personId === store.selectedId) renderChat();
+  });
+
+  es.addEventListener('phase', (e) => {
+    const { personId, phase } = JSON.parse(e.data);
+    // A null phase means the model stopped producing blocks. The turn is not
+    // over yet — a tool is probably running — so the tray stays up and just
+    // stops claiming to know what is happening.
+    workOf(personId).phase = phase;
+    if (personId === store.selectedId) renderChat();
+  });
+
+  es.addEventListener('tool', (e) => {
+    const t = JSON.parse(e.data);
+    const w = workOf(t.personId);
+    if (t.phase === 'start') {
+      w.tools.push({ id: t.id, name: t.name, input: t.input, done: false, isError: false });
+      w.order.push({ kind: 'tool', at: w.tools.length - 1 });
+    } else {
+      const tool = w.tools.find((x) => x.id === t.id) ?? w.tools.findLast((x) => !x.done);
+      if (tool) { tool.done = true; tool.isError = !!t.isError; }
+    }
+    if (t.personId === store.selectedId) renderChat();
+  });
+
+  es.addEventListener('turn-end', (e) => {
+    const { personId } = JSON.parse(e.data);
+    // The answer has landed. Everything the person said on the way here was
+    // narration — only the last thing they said is the answer, and it is the
+    // only thing that stays in the conversation.
+    const w = store.work.get(personId);
+    const answer = w?.notes.at(-1) ?? null;
+    store.work.delete(personId);
+    store.streaming.delete(personId);
+    if (answer) {
+      const list = store.chats.get(personId) ?? [];
+      list.push({ role: 'assistant', text: answer.text, at: answer.at, settled: true });
+      store.chats.set(personId, list.slice(-200));
+    }
     if (personId === store.selectedId) renderChat();
   });
 
   es.addEventListener('message', (e) => {
     const m = JSON.parse(e.data);
-    // The full message supersedes whatever we accumulated while it streamed.
-    // A bubble that was already on screen streaming must not re-enter as if it
-    // were new — it just stops being dashed.
-    const wasStreaming = store.streaming.has(m.personId);
-    if (m.role === 'assistant') store.streaming.delete(m.personId);
-    const list = store.chats.get(m.personId) ?? [];
-    list.push({ role: m.role, text: m.text, at: m.at, settled: m.role === 'assistant' && wasStreaming });
-    store.chats.set(m.personId, list.slice(-200));
+    if (m.role === 'assistant') {
+      // Held, not shown as a bubble: we cannot tell an interim remark from the
+      // answer until the turn ends, and by then the last one is the answer.
+      const w = workOf(m.personId);
+      w.notes.push({ text: m.text, at: m.at });
+      w.order.push({ kind: 'note', at: w.notes.length - 1 });
+      store.streaming.delete(m.personId);
+    } else {
+      const list = store.chats.get(m.personId) ?? [];
+      list.push({ role: m.role, text: m.text, at: m.at });
+      store.chats.set(m.personId, list.slice(-200));
+    }
     if (m.personId === store.selectedId) renderChat();
   });
 
@@ -148,15 +240,31 @@ async function select(id) {
   office.selectedId = id;
   if (!store.chats.has(id)) {
     const { entries } = await api(`/api/crew/${id}/transcript`);
-    store.chats.set(id, (entries ?? []).map(toMessage).filter(Boolean));
+    store.chats.set(id, fromTranscript(entries));
   }
   renderChat();
 }
 
-function toMessage(entry) {
-  if (entry.kind === 'text') return { role: entry.role, text: entry.text, at: entry.at };
-  if (entry.kind === 'tool_use') return { role: 'tool', text: `${entry.text} 실행`, at: entry.at };
-  return null;
+/**
+ * Rebuild the conversation the way the live view keeps it: what the user said,
+ * and the one thing the person said at the end of each turn. The running
+ * commentary and the tool calls were scaffolding — they were cleared on screen
+ * when the answer arrived, so reloading must not bring them back.
+ */
+function fromTranscript(entries) {
+  const out = [];
+  const lastOfTurn = new Map();
+  for (const e of entries ?? []) {
+    if (e.kind !== 'text') continue;
+    if (e.role === 'user') { out.push({ role: 'user', text: e.text, at: e.at }); continue; }
+    if (e.role !== 'assistant') continue;
+    const turn = e.turn ?? 0;
+    const held = lastOfTurn.get(turn);
+    const msg = { role: 'assistant', text: e.text, at: e.at };
+    if (held) Object.assign(held, msg);
+    else { out.push(msg); lastOfTurn.set(turn, msg); }
+  }
+  return out;
 }
 
 function selectedPerson() {
@@ -179,8 +287,19 @@ function renderChat() {
   el.watch.checked = !!person.watch;
   el.trust.checked = !!person.trusted;
 
+  // On the way out the composer stays visible but takes nothing: a message sent
+  // now would either vanish or derail the handover, and a greyed-out box says
+  // that better than an error would.
+  const leaving = person.state === 'leaving';
+  el.prompt.disabled = leaving;
+  el.send.disabled = leaving;
+  el.dismiss.disabled = leaving;
+  el.prompt.placeholder = leaving
+    ? '나가는 중입니다 — 남길 것을 정리하고 있어요.'
+    : '시킬 일을 적으세요.  (Enter 전송 · Shift+Enter 줄바꿈)';
+
   const msgs = store.chats.get(person.id) ?? [];
-  const streaming = store.streaming.get(person.id);
+  const work = store.work.get(person.id);
 
   const atBottom = el.chat.scrollHeight - el.chat.scrollTop - el.chat.clientHeight < 60;
   // Only what is genuinely new animates in; a re-render must never replay the
@@ -192,8 +311,8 @@ function renderChat() {
     const fresh = shown !== undefined && i >= shown && !m.settled;
     el.chat.appendChild(bubbleEl(m.role, m.text, false, fresh));
   });
-  if (streaming) el.chat.appendChild(bubbleEl('assistant', streaming, true));
-  if (!msgs.length && !streaming) {
+  if (work) el.chat.appendChild(trayEl(person.id, work));
+  if (!msgs.length && !work) {
     el.chat.innerHTML = '<p class="muted empty">아직 대화가 없습니다.</p>';
   }
   if (atBottom) el.chat.scrollTop = el.chat.scrollHeight;
@@ -205,9 +324,112 @@ const shownCount = new Map();
 function bubbleEl(role, text, streaming = false, fresh = false) {
   const d = document.createElement('div');
   d.className = `msg ${role}${streaming ? ' streaming' : ''}${fresh ? ' in' : ''}`;
-  d.textContent = text;
+  // What a person writes is Markdown — headings, lists, tables, links. What the
+  // user typed is not: rendering their own text back at them differently from
+  // how they typed it would be a small betrayal.
+  if (role === 'assistant') d.appendChild(renderMarkdown(text));
+  else d.textContent = text;
   return d;
 }
+
+// ── the work tray ────────────────────────────────────────────────────────
+/**
+ * What a person is doing right now, shown in place of the answer that has not
+ * arrived yet. It exists only for the length of one turn.
+ */
+function workOf(personId) {
+  let w = store.work.get(personId);
+  if (!w) {
+    w = { phase: null, startedAt: Date.now(), tools: [], notes: [], order: [], toolsOpen: false };
+    store.work.set(personId, w);
+  }
+  return w;
+}
+
+const PHASE_LABEL = { thinking: '생각 중', writing: '쓰는 중', tool: '작업 중' };
+
+function trayEl(personId, w) {
+  const root = document.createElement('div');
+  root.className = 'work in';
+
+  const head = document.createElement('div');
+  head.className = 'work-head';
+  const running = w.tools.findLast((t) => !t.done);
+  const label = running ? `${running.name} 실행 중` : (PHASE_LABEL[w.phase] ?? '일하는 중');
+  head.innerHTML = '<span class="work-dot"></span>';
+  const what = document.createElement('span');
+  what.className = 'work-what';
+  what.textContent = label;
+  const elapsed = document.createElement('span');
+  elapsed.className = 'work-elapsed';
+  elapsed.textContent = elapsedText(w.startedAt);
+  head.append(what, elapsed);
+  root.appendChild(head);
+
+  // Tools are folded into one row. Which files were read and which commands ran
+  // is available, but it is not what the user came to see.
+  if (w.tools.length) {
+    const d = document.createElement('details');
+    d.className = 'work-tools';
+    d.open = w.toolsOpen;
+    d.addEventListener('toggle', () => { w.toolsOpen = d.open; });
+    const s = document.createElement('summary');
+    const kinds = [...new Set(w.tools.map((t) => t.name))].slice(0, 3).join(', ');
+    s.textContent = `도구 ${w.tools.length}번 · ${kinds}`;
+    d.appendChild(s);
+    for (const t of w.tools) {
+      const row = document.createElement('div');
+      row.className = `work-tool${t.done ? ' done' : ''}${t.isError ? ' bad' : ''}`;
+      row.textContent = `${t.name} — ${toolDetail(t.input)}`;
+      d.appendChild(row);
+    }
+    root.appendChild(d);
+  }
+
+  // What the person wrote on the way to the answer, newest last.
+  const said = w.order
+    .filter((o) => o.kind === 'note')
+    .map((o) => w.notes[o.at]?.text)
+    .filter(Boolean);
+  const partial = store.streaming.get(personId);
+  for (const text of said) root.appendChild(noteEl(text));
+  if (partial) root.appendChild(noteEl(partial, true));
+
+  return root;
+}
+
+function noteEl(text, streaming = false) {
+  const n = document.createElement('div');
+  n.className = `work-note${streaming ? ' streaming' : ''}`;
+  // Half-typed Markdown is worse than none — a `**` that becomes bold two
+  // keystrokes later makes the line jump. The partial stays plain and is
+  // formatted the moment it is whole.
+  if (streaming) n.textContent = text;
+  else n.appendChild(renderMarkdown(text));
+  return n;
+}
+
+/** One line of "what is this tool actually doing", never the whole payload. */
+function toolDetail(input) {
+  if (!input || typeof input !== 'object') return '';
+  const v = input.command ?? input.file_path ?? input.path ?? input.pattern ?? input.url ?? input.description;
+  const s = String(v ?? Object.keys(input).join(', ')).replace(/\s+/g, ' ').trim();
+  return s.length > 90 ? `${s.slice(0, 90)}…` : s;
+}
+
+function elapsedText(startedAt) {
+  const secs = Math.max(0, Math.round((Date.now() - startedAt) / 1000));
+  return secs < 60 ? `${secs}초` : `${Math.floor(secs / 60)}분 ${secs % 60}초`;
+}
+
+// The elapsed counter is the only thing that changes on its own, so it is
+// written in place — rebuilding the tray would close a dropdown mid-read.
+setInterval(() => {
+  const w = store.selectedId && store.work.get(store.selectedId);
+  if (!w) return;
+  const node = el.chat.querySelector('.work-elapsed');
+  if (node) node.textContent = elapsedText(w.startedAt);
+}, 1000);
 
 el.composer.addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -216,6 +438,12 @@ el.composer.addEventListener('submit', async (e) => {
   if ((!text && !pending.length) || !person) return;
   el.prompt.value = '';
   el.send.disabled = true;
+  // Say "생각 중" on the click, not when the first token comes back — the wait
+  // before the model answers is exactly the part that needs an answer.
+  const w = workOf(person.id);
+  w.phase = 'thinking';
+  w.startedAt = Date.now();
+  renderChat();
   const files = await uploadPending(person.id);
   await api(`/api/crew/${person.id}/send`, { method: 'POST', body: { text, files } });
   el.send.disabled = false;
@@ -241,15 +469,43 @@ el.trust.addEventListener('change', async () => {
   await api(`/api/crew/${person.id}/trust`, { method: 'POST', body: { on: el.trust.checked } });
 });
 
-el.dismiss.addEventListener('click', async () => {
+// The button and the door lead to the same place. Going out through the button
+// used to end the session on the spot, which threw away everything the person
+// had worked out — now both ask, and both hand over first.
+el.dismiss.addEventListener('click', (e) => {
   const person = selectedPerson();
   if (!person) return;
-  await api(`/api/crew/${person.id}`, { method: 'DELETE' });
-  store.chats.delete(person.id);
-  shownCount.delete(person.id);
-  store.selectedId = null;
-  office.selectedId = null;
-  renderChat();
+  const r = e.currentTarget.getBoundingClientRect();
+  askToLeave(person.id, { x: r.left + r.width / 2, y: r.top + r.height / 2 });
+});
+
+// ── leaving ──────────────────────────────────────────────────────────────
+let leavingId = null;
+
+function askToLeave(id, origin) {
+  const person = store.crew.find((p) => p.id === id);
+  if (!person || person.state === 'leaving') return;
+  leavingId = id;
+  el.leaveWho.textContent =
+    `${person.name} · ${person.personaLabel} — 나가기 전에 이번에 알게 된 것을 `
+    + '업무 지침과 이 유형의 스킬에 남깁니다.';
+  openSheet(el.leave, origin);
+}
+
+el.leaveNo.addEventListener('click', () => { leavingId = null; closeSheet(el.leave); });
+el.leave.addEventListener('click', (e) => {
+  if (e.target === el.leave) { leavingId = null; closeSheet(el.leave); }
+});
+
+el.leaveYes.addEventListener('click', async () => {
+  const id = leavingId;
+  leavingId = null;
+  closeSheet(el.leave);
+  if (!id) return;
+  // The office starts crying the moment the state comes back over the stream;
+  // the seat only empties when the handover behind it is finished.
+  await api(`/api/crew/${id}/leave`, { method: 'POST' });
+  if (store.selectedId === id) renderChat();
 });
 
 // ── sheets ───────────────────────────────────────────────────────────────
@@ -306,7 +562,7 @@ function closeSheet(modal) {
 
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
-  for (const modal of [el.types, el.hire]) {
+  for (const modal of [el.leave, el.types, el.hire]) {
     if (!modal.hidden) { closeSheet(modal); break; } // topmost only — never trap
   }
 });
@@ -508,11 +764,62 @@ el.typesSave.addEventListener('click', async () => {
 function renderCrew() {
   office.setState(store);
   const seated = store.crew.length;
-  el.hint.textContent = seated >= (store.meta.maxSeats ?? 4)
-    ? '자리가 다 찼습니다. 한 명 퇴근시키면 새로 부를 수 있습니다.'
-    : '빈 책상을 누르면 사람을 부릅니다.';
-  if (store.selectedId && !store.crew.some((p) => p.id === store.selectedId)) renderChat();
+  const leaving = store.crew.some((p) => p.state === 'leaving');
+  el.hint.textContent = leaving
+    ? '나가는 사람이 이번에 알게 된 것을 정리하는 중입니다.'
+    : seated >= (store.meta.maxSeats ?? 4)
+      ? '자리가 다 찼습니다. 오른쪽 문으로 한 명 내보내면 새로 부를 수 있습니다.'
+      : '빈 책상을 누르면 사람을 부릅니다. 문으로 끌면 내보냅니다.';
+
+  // Someone who has left is gone: their conversation goes with them, or the
+  // next person to take that seat would inherit it.
+  const here = new Set(store.crew.map((p) => p.id));
+  for (const id of [...store.chats.keys()]) {
+    if (here.has(id)) continue;
+    store.chats.delete(id);
+    store.work.delete(id);
+    shownCount.delete(id);
+  }
+  if (store.selectedId && !here.has(store.selectedId)) renderChat();
 }
+
+/**
+ * The left panel is only a summary and a way to start a group — the tables in
+ * the room are where the work is actually done, because dragging one person to
+ * another table is the whole interaction and a list cannot express it.
+ */
+function renderWindows() {
+  const d = store.desktop ?? {};
+  office.setState(store);
+  const people = d.people ?? [];
+  el.windowsPanel.hidden = !d.supported;
+  if (!d.supported) return;
+
+  const grouped = people.filter((p) => p.groupId).length;
+  const tabs = people.filter((p) => p.kind === 'tab').length;
+  const rows = [
+    ['열린 창', `${people.length - tabs}개`],
+    ['브라우저 탭', d.uia ? `${tabs}개` : '읽을 수 없음'],
+    ['그룹', `${store.groups.length}개 · ${grouped}명`],
+  ];
+  el.windowsSummary.innerHTML = '';
+  for (const [k, v] of rows) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    const a = document.createElement('span');
+    a.textContent = k;
+    const b = document.createElement('span');
+    b.textContent = v;
+    row.append(a, b);
+    el.windowsSummary.appendChild(row);
+  }
+}
+
+el.groupNew.addEventListener('click', async () => {
+  const name = prompt('새 그룹 이름', '새 그룹');
+  if (!name?.trim()) return;
+  await api('/api/desktop/groups', { method: 'POST', body: { name: name.trim() } });
+});
 
 function renderUsage() {
   const u = store.usage;
@@ -573,6 +880,11 @@ function renderTasks() {
     const s = document.createElement('span');
     s.textContent = t.minutes ? `${t.minutes}분` : '';
     row.append(b, s);
+    // A task is the natural name for a group of windows — it is literally the
+    // thing you opened them all for.
+    row.addEventListener('pointerdown', (e) => startCardDrag(row, {
+      kind: 'task', name: t.name, sub: t.minutes ? `${t.minutes}분` : '',
+    }, e));
     el.tasks.appendChild(row);
   }
   if (timer) {
@@ -595,24 +907,32 @@ function renderJobs() {
     card.className = 'job-card';
     card.innerHTML = '<b></b><small></small>';
     card.querySelector('b').textContent = j.name;
-    card.querySelector('small').textContent =
-      `${j.runCount}회${j.avgMinutes ? ` · 보통 ${j.avgMinutes}분` : ''}`;
-    card.addEventListener('pointerdown', (e) => startJobDrag(card, j, e));
+    const sub = `${j.runCount}회${j.avgMinutes ? ` · 보통 ${j.avgMinutes}분` : ''}`;
+    card.querySelector('small').textContent = sub;
+    card.addEventListener('pointerdown', (e) => startCardDrag(card, {
+      kind: 'job', name: j.name, sub,
+    }, e));
     el.jobs.appendChild(card);
   }
 }
 
 /**
- * Handing a job to someone is a physical act, so it is a pointer gesture rather
+ * Handing a card to someone is a physical act, so it is a pointer gesture rather
  * than HTML5 drag-and-drop — that API reports a drop and nothing in between,
  * which is exactly the continuous feedback this needs.
  *
  * The card leaves a dimmed copy of itself behind, the one in the air stays glued
  * to the point you grabbed it by, leans into the direction it is moving, and on
- * release either lands on the person (its momentum projected, so a flick counts)
+ * release either lands on its target (its momentum projected, so a flick counts)
  * or springs home carrying the velocity your hand gave it.
+ *
+ * Where it can land depends on what it is:
+ *   일 카드   → a person (they pick the job up), or a table (it names the group)
+ *   할 일     → a table, or empty floor in the windows zone (a new group)
+ *
+ * @param {{kind:'job'|'task', name:string, sub:string}} item
  */
-function startJobDrag(card, job, down) {
+function startCardDrag(card, item, down) {
   if (down.button !== 0) return;
   const origin = card.getBoundingClientRect();
   const grab = { x: down.clientX - origin.left, y: down.clientY - origin.top };
@@ -634,8 +954,8 @@ function startJobDrag(card, job, down) {
     ghost = document.createElement('div');
     ghost.className = 'job-ghost';
     ghost.innerHTML = '<b></b><small></small>';
-    ghost.querySelector('b').textContent = job.name;
-    ghost.querySelector('small').textContent = card.querySelector('small').textContent;
+    ghost.querySelector('b').textContent = item.name;
+    ghost.querySelector('small').textContent = item.sub;
     ghost.style.minWidth = `${origin.width}px`;
     el.dragLayer.appendChild(ghost);
     card.classList.add('lifted');
@@ -643,11 +963,24 @@ function startJobDrag(card, job, down) {
     paint();
   };
 
-  const setHover = (person) => {
-    if (hovered === person?.id) return;
+  /** Where this card would land right now — or null if nowhere. */
+  const targetAt = (x, y) => {
+    const hit = office.hitAtClient(x, y);
+    if (!hit) return null;
+    if (hit.kind === 'seat' && hit.person && item.kind === 'job') return hit;
+    if (hit.kind === 'pod') return hit;
+    if (hit.kind === 'zone') return hit;
+    return null;
+  };
+
+  const setHover = (hit) => {
+    const id = hit?.kind === 'seat' ? hit.person.id : hit?.groupId ?? null;
+    if (hovered === id) return;
     if (hovered) office.plates.get(hovered)?.classList.remove('drop');
-    hovered = person?.id ?? null;
-    if (hovered) office.plates.get(hovered)?.classList.add('drop');
+    office.dropHint = null;
+    hovered = id;
+    if (hit?.kind === 'seat') office.plates.get(id)?.classList.add('drop');
+    else if (hit?.kind === 'pod') office.dropHint = id;
   };
 
   const onMove = (e) => {
@@ -663,7 +996,7 @@ function startJobDrag(card, job, down) {
     const want = Math.max(-6, Math.min(6, track.get().x / 130));
     tilt += (want - tilt) * 0.25;
     paint();
-    setHover(office.hitAtClient(e.clientX, e.clientY)?.person ?? null);
+    setHover(targetAt(e.clientX, e.clientY));
   };
 
   const onUp = (e) => {
@@ -671,6 +1004,7 @@ function startJobDrag(card, job, down) {
     card.removeEventListener('pointerup', onUp);
     card.removeEventListener('pointercancel', onUp);
     el.stage.classList.remove('drop-target');
+    setHover(null);
     if (!ghost) return; // a tap, not a throw
 
     const v = track.get();
@@ -679,20 +1013,23 @@ function startJobDrag(card, job, down) {
     // 0.998: across a few hundred pixels the slower rate throws the card most
     // of the way across the screen, which is not what the hand meant.
     const landing = { x: e.clientX + project(v.x, 0.99), y: e.clientY + project(v.y, 0.99) };
-    const hit = office.hitAtClient(e.clientX, e.clientY)?.person
-      ? office.hitAtClient(e.clientX, e.clientY)
-      : office.hitAtClient(landing.x, landing.y);
-    setHover(null);
+    const hit = targetAt(e.clientX, e.clientY) ?? targetAt(landing.x, landing.y);
 
-    if (hit?.person) handOff(hit, v);
+    if (hit) handOff(hit, v);
     else springHome(v);
   };
 
   // The work starts the moment you let go; the animation is only how it looks.
   function handOff(hit, v) {
-    const person = hit.person;
-    api(`/api/crew/${person.id}/job`, { method: 'POST', body: { jobName: job.name } });
-    select(person.id);
+    if (hit.kind === 'seat') {
+      api(`/api/crew/${hit.person.id}/job`, { method: 'POST', body: { jobName: item.name } });
+      select(hit.person.id);
+    } else if (hit.kind === 'pod') {
+      // Naming an existing table after this piece of work.
+      api(`/api/desktop/groups/${hit.groupId}`, { method: 'POST', body: { name: item.name } });
+    } else {
+      api('/api/desktop/groups', { method: 'POST', body: { name: item.name } });
+    }
 
     const r = office.canvas.getBoundingClientRect();
     const target = {
@@ -738,6 +1075,7 @@ function startJobDrag(card, job, down) {
   function cleanup() {
     ghost?.remove();
     ghost = null;
+    office.dropHint = null;
     card.classList.remove('lifted');
   }
 
@@ -805,9 +1143,93 @@ function renderAll() {
   renderApprovals();
   renderTasks();
   renderJobs();
+  renderWindows();
   renderChat();
 }
 window.__render = renderAll; // handy for the Playwright checks
+
+// ── chat width ───────────────────────────────────────────────────────────
+/**
+ * How wide the conversation gets to be. Long answers with tables and code want
+ * far more room than a nameplate does, and how much is a matter of what you are
+ * doing today — so it is a handle, and the choice is remembered.
+ *
+ * The room in the middle takes whatever is left and re-picks its own whole-number
+ * zoom every frame (office.js `_resizeToFit`), so nothing here has to tell it.
+ */
+const WIDTH_KEY = 'crew.chatWidth';
+const app = document.querySelector('.app');
+const resizer = document.getElementById('chat-resize');
+
+/** Never so wide that the room has no room, nor so narrow it cannot be grabbed back. */
+function clampWidth(px) {
+  const max = Math.max(300, Math.min(820, window.innerWidth - 560));
+  return Math.round(Math.max(280, Math.min(max, px)));
+}
+
+function setChatWidth(px, { save = true } = {}) {
+  const w = clampWidth(px);
+  app.style.setProperty('--right-w', `${w}px`);
+  resizer.setAttribute('aria-valuenow', String(w));
+  if (save) { try { localStorage.setItem(WIDTH_KEY, String(w)); } catch { /* private mode */ } }
+  return w;
+}
+
+function clearChatWidth() {
+  app.style.removeProperty('--right-w');
+  resizer.removeAttribute('aria-valuenow');
+  try { localStorage.removeItem(WIDTH_KEY); } catch { /* private mode */ }
+}
+
+function currentChatWidth() {
+  return document.querySelector('.right').getBoundingClientRect().width;
+}
+
+(function restoreChatWidth() {
+  let saved = null;
+  try { saved = localStorage.getItem(WIDTH_KEY); } catch { /* private mode */ }
+  if (saved) setChatWidth(Number(saved), { save: false });
+})();
+
+// A window that shrank below what the saved width allows gets the clamped one —
+// but the saved number is left alone, so widening the window restores it.
+window.addEventListener('resize', () => {
+  if (app.style.getPropertyValue('--right-w')) setChatWidth(currentChatWidth(), { save: false });
+});
+
+resizer.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0) return;
+  e.preventDefault();
+  resizer.setPointerCapture(e.pointerId);
+  resizer.classList.add('dragging');
+  document.body.classList.add('resizing');
+
+  // Measured from the right edge of the window, which is where this column ends.
+  const move = (ev) => setChatWidth(document.documentElement.clientWidth - ev.clientX, { save: false });
+  const up = () => {
+    resizer.removeEventListener('pointermove', move);
+    resizer.removeEventListener('pointerup', up);
+    resizer.removeEventListener('pointercancel', up);
+    resizer.classList.remove('dragging');
+    document.body.classList.remove('resizing');
+    setChatWidth(currentChatWidth()); // one write at the end, not one per pixel
+  };
+  resizer.addEventListener('pointermove', move);
+  resizer.addEventListener('pointerup', up);
+  resizer.addEventListener('pointercancel', up);
+});
+
+// Double-click puts it back to whatever this screen size would have chosen.
+resizer.addEventListener('dblclick', clearChatWidth);
+
+resizer.addEventListener('keydown', (e) => {
+  const step = e.shiftKey ? 48 : 12;
+  if (e.key === 'ArrowLeft') setChatWidth(currentChatWidth() + step);
+  else if (e.key === 'ArrowRight') setChatWidth(currentChatWidth() - step);
+  else if (e.key === 'Home' || e.key === 'Escape') clearChatWidth();
+  else return;
+  e.preventDefault();
+});
 
 // ── loop ─────────────────────────────────────────────────────────────────
 let last = 0;

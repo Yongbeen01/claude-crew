@@ -88,9 +88,11 @@ export class Runner extends EventEmitter {
     this.lastText = '';
     this.pendingTools = new Map(); // tool_use_id -> { name, input, at }
     this.recentTools = [];
-    this.transcript = []; // { role, kind, text, at }
+    this.transcript = []; // { role, kind, text, turn, at }
+    this.turn = 0;
     this._buf = '';
     this._partial = '';
+    this.phase = null;   // thinking | writing | tool | null
     this._resuming = false;
     this._restarting = false;
   }
@@ -274,9 +276,19 @@ export class Runner extends EventEmitter {
         break;
 
       case 'stream_event': {
-        // Live typing. Only text deltas are worth forwarding to the UI.
-        const d = ev.event?.delta;
-        if (ev.event?.type === 'content_block_delta' && d?.type === 'text_delta' && d.text) {
+        const e = ev.event;
+        // Which kind of block just opened tells us what the person is doing
+        // right now. The thinking block's *text* is always empty — current
+        // models never return the raw chain of thought — but its start and stop
+        // are real, so "생각 중" is a fact rather than a guess.
+        if (e?.type === 'content_block_start') {
+          const kind = e.content_block?.type;
+          if (kind === 'thinking') this._setPhase('thinking');
+          else if (kind === 'text') this._setPhase('writing');
+          else if (kind === 'tool_use') this._setPhase('tool');
+        }
+        const d = e?.delta;
+        if (e?.type === 'content_block_delta' && d?.type === 'text_delta' && d.text) {
           this._partial += d.text;
           this.emit('delta', d.text);
         }
@@ -315,6 +327,8 @@ export class Runner extends EventEmitter {
         this.state = 'idle';
         this.pendingTools.clear();
         this._partial = '';
+        this._setPhase(null);
+        this.turn += 1; // everything pushed from here on belongs to the next turn
         this.emit('result', ev);
         break;
       }
@@ -325,8 +339,21 @@ export class Runner extends EventEmitter {
     this.emit('change');
   }
 
+  /** thinking | writing | tool | null. Only announced when it actually changes. */
+  _setPhase(phase) {
+    if (this.phase === phase) return;
+    this.phase = phase;
+    this.emit('phase', phase);
+  }
+
+  /**
+   * Stamped with the turn it belongs to. Reloading the page has to rebuild the
+   * same conversation the live view showed, and the live view keeps only the
+   * last thing a person said in a turn — without this the history cannot tell
+   * which remark that was.
+   */
   _push(entry) {
-    this.transcript.push({ ...entry, at: Date.now() });
+    this.transcript.push({ ...entry, turn: this.turn, at: Date.now() });
     if (this.transcript.length > 400) this.transcript.splice(0, this.transcript.length - 400);
   }
 
@@ -356,6 +383,7 @@ export class Runner extends EventEmitter {
     this.turns += 1;
     this.state = 'working';
     this.lastActivityAt = Date.now();
+    this._setPhase('thinking');
     if (!hidden) this._push({ role: 'user', kind: 'text', text: body });
     this.emit('change');
     return this._write(body);

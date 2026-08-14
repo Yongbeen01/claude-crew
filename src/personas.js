@@ -118,6 +118,47 @@ export function saveSkill(key, skillName, body) {
   return listSkills(key).find((s) => s.name === skillName) ?? null;
 }
 
+/**
+ * Add what a leaving person worked out to one of this type's skills.
+ *
+ * Appends under a single "배운 것" heading and never repeats a line, so the file
+ * grows by what is genuinely new rather than by every session that re-learned
+ * the same lesson. Creates the skill — with frontmatter, or the CLI will not
+ * load it — the first time this type has anything to remember.
+ *
+ * @returns {number} how many lines were actually new
+ */
+export function appendSkillLines(key, skillName, newLines) {
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(String(skillName))) return 0;
+  if (!fs.existsSync(path.join(PERSONAS_DIR, key))) return 0;
+  const dir = path.join(PERSONAS_DIR, key, 'skills', skillName);
+  const file = path.join(dir, 'SKILL.md');
+
+  let body = readText(file);
+  if (!body.trim()) {
+    body = [
+      '---',
+      `name: ${skillName}`,
+      'description: 이 자리에서 일해 본 사람들이 남긴 것. 비슷한 일을 맡으면 먼저 읽는다.',
+      '---',
+      '',
+    ].join('\n');
+  }
+
+  const HEADING = '## 배운 것';
+  if (!body.includes(HEADING)) body = `${body.replace(/\n+$/, '')}\n\n${HEADING}\n`;
+
+  const known = new Set(
+    body.split('\n').map((l) => l.replace(/^-\s*/, '').trim()).filter(Boolean),
+  );
+  const added = newLines.filter((l) => !known.has(l));
+  if (!added.length) return 0;
+
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(file, `${body.replace(/\n+$/, '')}\n${added.map((l) => `- ${l}`).join('\n')}\n`, 'utf8');
+  return added.length;
+}
+
 export function deleteSkill(key, skillName) {
   if (!/^[a-z0-9][a-z0-9-]*$/.test(String(skillName))) throw new Error('bad skill name');
   const dir = path.join(PERSONAS_DIR, key, 'skills', skillName);
