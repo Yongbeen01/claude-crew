@@ -42,6 +42,26 @@ Write-Host "  여러 클로드에게 일을 시키고 한 화면에서 지켜보
 
 New-Item -ItemType Directory -Force -Path $DataDir, $Runtime | Out-Null
 
+# 이미 돌고 있으면 먼저 멈춘다. 실행 중인 node.exe 가 앱 폴더를 잠그고 있어서,
+# 그대로 두면 아래에서 폴더를 지우거나 clone 할 때 '액세스가 거부되었습니다'(코드 5)
+# 로 끝난다 — 받는 사람 화면에는 그 한 줄만 남아 원인을 알 수 없다.
+Step '실행 중인 앱 확인'
+$stopped = $false
+foreach ($p in (Get-Process node -ErrorAction SilentlyContinue)) {
+  $cmdline = ''
+  try { $cmdline = (Get-CimInstance Win32_Process -Filter "ProcessId=$($p.Id)" -ErrorAction Stop).CommandLine } catch {}
+  if ($cmdline -like "*$AppDir*") {
+    Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+    $stopped = $true
+  }
+}
+if ($stopped) {
+  Say '실행 중이던 앱을 멈췄습니다 (설치 후 다시 켭니다)'
+  Start-Sleep -Seconds 2
+} else {
+  Say '실행 중인 앱 없음'
+}
+
 # ── 1. Node ──────────────────────────────────────────────────────────────────
 Step 'Node 확인'
 $nodeOk = $false

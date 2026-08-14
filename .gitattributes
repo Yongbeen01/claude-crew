@@ -1,0 +1,8 @@
+# cmd.exe 는 LF 만 있는 .bat 을 제대로 파싱하지 못한다. git 이 커밋할 때 LF 로
+# 정규화하면 GitHub 이 LF 로 내보내고, 받는 사람은 원인을 알 수 없는 오류를 본다.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# PowerShell 은 LF 도 읽지만, 윈도우 전용 스크립트라 굳이 섞지 않는다.
+*.ps1 text eol=crlf
+*.vbs text eol=crlf
