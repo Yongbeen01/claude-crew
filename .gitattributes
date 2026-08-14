@@ -1,8 +1,12 @@
-# cmd.exe 는 LF 만 있는 .bat 을 제대로 파싱하지 못한다. git 이 커밋할 때 LF 로
-# 정규화하면 GitHub 이 LF 로 내보내고, 받는 사람은 원인을 알 수 없는 오류를 본다.
-*.bat text eol=crlf
-*.cmd text eol=crlf
+# .bat 은 바이트 그대로 저장한다 (-text).
+#
+# `text eol=crlf` 로는 부족하다 — 그건 "저장은 LF, 체크아웃은 CRLF" 라서
+# raw.githubusercontent.com 이 내보내는 파일은 여전히 LF 다. 받는 사람은 그 LF
+# 파일을 그대로 두 번 누르게 되고, cmd.exe 는 LF 만 있는 .bat 을 온전히 파싱하지
+# 못한다. 그래서 diff 가 조금 지저분해지는 것을 감수하고 바이너리로 취급한다.
+*.bat -text
+*.cmd -text
 
-# PowerShell 은 LF 도 읽지만, 윈도우 전용 스크립트라 굳이 섞지 않는다.
+# PowerShell 은 LF 도 잘 읽으므로 체크아웃 시점에만 CRLF 로 맞춘다.
 *.ps1 text eol=crlf
 *.vbs text eol=crlf
