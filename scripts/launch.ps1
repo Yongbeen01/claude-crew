@@ -15,6 +15,13 @@ $DataDir = if ($env:CLAUDE_CREW_DIR) { $env:CLAUDE_CREW_DIR } else { Join-Path $
 $LogDir  = Join-Path $DataDir 'logs'
 $PidFile = Join-Path $DataDir 'crew.pid'
 
+# 설치할 때 UAC 없이 받아둔 무설치 Node·git 이 있으면 그걸 쓴다. 시스템에 설치된
+# 것이 있으면 그쪽이 먼저 잡히도록 뒤에 붙인다.
+$runtime = Join-Path $DataDir 'runtime'
+foreach ($d in @((Join-Path $runtime 'node'), (Join-Path $runtime 'git\cmd'))) {
+  if ((Test-Path $d) -and ($env:Path -notlike "*$d*")) { $env:Path = "$env:Path;$d" }
+}
+
 $port = 4320
 $cfg  = Join-Path $DataDir 'config.json'
 if (Test-Path $cfg) {
