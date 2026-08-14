@@ -1,4 +1,4 @@
-﻿# claude-crew 설치 — 이 한 줄이면 됩니다.
+# claude-crew 설치 — 이 한 줄이면 됩니다.
 #
 #   irm https://raw.githubusercontent.com/Yongbeen01/claude-crew/main/scripts/install.ps1 | iex
 #
@@ -7,13 +7,17 @@
 # 업무 이력·지침은 %USERPROFILE%\.claude-crew 에 따로 있으므로 재설치해도 남습니다.
 
 $ErrorActionPreference = 'Stop'
+# 한글이 물음표로 깨지지 않게. 이 파일은 BOM 없이 저장해야 합니다 —
+# irm | iex 는 BOM 을 명령어로 읽어서 첫 줄에 에러를 찍습니다.
+try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch {}
+
 $Repo    = if ($env:CREW_REPO) { $env:CREW_REPO } else { 'https://github.com/Yongbeen01/claude-crew.git' }
 $Branch  = if ($env:CREW_BRANCH) { $env:CREW_BRANCH } else { 'main' }
 $AppDir  = Join-Path $env:LOCALAPPDATA 'claude-crew'
 $DataDir = Join-Path $env:USERPROFILE '.claude-crew'
 
 function Say($msg)  { Write-Host "  $msg" }
-function Step($msg) { Write-Host "`n▸ $msg" -ForegroundColor Cyan }
+function Step($msg) { Write-Host "`n> $msg" -ForegroundColor Cyan }
 function Warn($msg) { Write-Host "  ! $msg" -ForegroundColor Yellow }
 function Has($cmd)  { [bool](Get-Command $cmd -ErrorAction SilentlyContinue) }
 
