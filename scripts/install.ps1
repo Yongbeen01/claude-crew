@@ -37,6 +37,21 @@ if (-not $nodeOk) {
   if (-not (Has node)) { throw 'Node 를 설치했지만 이 창에서는 인식되지 않습니다. PowerShell 을 새로 열고 다시 실행해 주세요.' }
 }
 
+# ── 1b. git ──────────────────────────────────────────────────────────────────
+# 없어도 압축본으로 설치는 되지만, git 이 있어야 앱이 스스로 업데이트할 수 있습니다.
+# GitHub 계정은 필요 없습니다 — 공개 저장소라 익명으로 받습니다.
+Step 'git 확인'
+if (Has git) {
+  Say "$((git --version)) — 그대로 씁니다"
+} elseif (Has winget) {
+  Say 'git 을 설치합니다 (자동 업데이트에 필요합니다)…'
+  winget install --id Git.Git --silent --accept-source-agreements --accept-package-agreements | Out-Null
+  $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
+  if (Has git) { Say '설치했습니다' } else { Warn 'git 을 인식하지 못했습니다 — 압축본으로 설치하고 자동 업데이트는 꺼집니다' }
+} else {
+  Warn 'git 이 없어 압축본으로 설치합니다 — 자동 업데이트 대신 이 설치 한 줄을 다시 실행하시면 됩니다'
+}
+
 # ── 2. Claude Code ───────────────────────────────────────────────────────────
 Step 'Claude Code 확인'
 if (Has claude) {
