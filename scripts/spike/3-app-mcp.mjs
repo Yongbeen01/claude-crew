@@ -89,6 +89,7 @@ const args = [
   '--session-id', sessionId,
   '--model', 'haiku',
   '--mcp-config', mcpConfig,
+  '--no-session-persistence',   // 검증용 세션이 사용자의 Claude Code 기록에 남지 않게
   '--strict-mcp-config',
   '--setting-sources', '',
   '--settings', '{"disableAllHooks":true}',

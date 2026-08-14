@@ -31,6 +31,7 @@ function ask({ withPlugin }) {
     '--verbose',
     '--session-id', sessionId,
     '--model', 'haiku',
+    '--no-session-persistence',   // 검증용 세션이 사용자의 Claude Code 기록에 남지 않게
     '--strict-mcp-config',
     '--setting-sources', '',                 // ignore this machine's own user/project settings
     '--settings', '{"disableAllHooks":true}',

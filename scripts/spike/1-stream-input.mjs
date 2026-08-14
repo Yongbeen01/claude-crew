@@ -20,6 +20,7 @@ const args = [
   '--session-id', sessionId,
   '--model', 'haiku',
   '--tools', '',                 // conversation only — keeps the spike fast and cheap
+  '--no-session-persistence',   // 검증용 세션이 사용자의 Claude Code 기록에 남지 않게
   '--strict-mcp-config',
   '--settings', '{"disableAllHooks":true}',
 ];
