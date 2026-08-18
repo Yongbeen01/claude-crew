@@ -163,7 +163,7 @@ body:has(.update-bar:not([hidden])) .app { height: calc(100% - 40px); }
 /* 왼쪽: 이름표 줄 · 사무실 · 상태 띠 */
 .main-area {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto 6px var(--deck-h);
+  grid-template-rows: minmax(0, 1fr) auto 6px var(--deck-h);
   min-height: 0;
   background: repeating-linear-gradient(180deg, #6d4728 0 30px, #5c3b20 30px 33px);
 }
@@ -171,12 +171,10 @@ body:has(.update-bar:not([hidden])) .app { height: calc(100% - 40px); }
  * A `hidden` child is `display: none` and takes NO row, so the moment the hint
  * was empty everything after it slid up one — the status strip ended up in the
  * 6px handle row, six pixels tall, with its contents unclickable. */
-.main-area > .brand { grid-row: 1; }
-.main-area > .stage { grid-row: 2; }
-.main-area > .hint { grid-row: 3; }
-.main-area > .resizer-h { grid-row: 4; }
-.main-area > .deck-wrap { grid-row: 5; }
-.main-area .brand { padding: 8px 14px; }
+.main-area > .stage { grid-row: 1; }
+.main-area > .hint { grid-row: 2; }
+.main-area > .resizer-h { grid-row: 3; }
+.main-area > .deck-wrap { grid-row: 4; }
 
 /* 상태 섹션들: 좁고 긴 칸이 아니라 넓고 낮은 띠에 놓이므로, 세로로 쌓지 않고
  * 나란히 세운다. 각 판때기는 그 안에서만 세로로 스크롤한다. */
@@ -276,27 +274,6 @@ body:has(.update-bar:not([hidden])) .app { height: calc(100% - 40px); }
   background:
     repeating-linear-gradient(180deg,
       #6d4728 0 30px, #5c3b20 30px 33px);
-}
-
-.brand { display: flex; align-items: center; gap: 10px; }
-.brand > div { flex: 1; min-width: 0; }
-.brand b {
-  display: block;
-  font-size: 15px; font-weight: 800;
-  letter-spacing: -.01em;
-  color: var(--paper-hi);
-  text-shadow: 2px 2px 0 var(--wood-deep);
-}
-.brand small {
-  color: #e3c795; font-size: 11px; font-weight: 600; letter-spacing: .02em;
-  text-shadow: 1px 1px 0 var(--wood-deep);
-}
-.logo {
-  width: 26px; height: 26px; flex: none;
-  clip-path: var(--notch-sm);
-  background:
-    linear-gradient(135deg, var(--leaf) 0 50%, var(--accent) 50% 100%);
-  box-shadow: inset 0 0 0 3px var(--wood-dark);
 }
 
 /* 판때기 — 이 화면의 기본 재질. 위/왼쪽 하이라이트 + 아래/오른쪽 그늘. */
@@ -664,6 +641,11 @@ body:has(.update-bar:not([hidden])) .app { height: calc(100% - 40px); }
 
 /* ── chat ──────────────────────────────────────────────────────────────── */
 .chat-panel { display: flex; flex-direction: column; gap: 10px; }
+/* 대화창 머리 — 제목 옆에 버전과 유형 편집. 화면 맨 위의 이름표 줄을 없애고
+ * 방이 그 높이를 가져갔으므로, 갈 곳 없어진 버튼이 여기로 왔다. */
+.chat-head { display: flex; align-items: center; gap: 8px; }
+.chat-head h2 { margin: 0; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-head small { color: var(--ink-mute); font-size: 10px; font-weight: 600; letter-spacing: .02em; flex: none; }
 .chat {
   flex: 1;
   overflow-y: auto;
@@ -1302,8 +1284,7 @@ button.tiny { padding: 4px 10px; font-size: 11px; }
 }
 @media (max-height: 720px) {
   .app { --deck-h: min(195px, 27vh); }
-  .brand .logo, .brand small { display: none; }
-  .brand b { font-size: 13px; }
+  .chat-head small { display: none; }
   .update-bar { height: 34px; }
   body:has(.update-bar:not([hidden])) .app { height: calc(100% - 34px); }
 }
