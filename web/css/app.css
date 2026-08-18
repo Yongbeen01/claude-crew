@@ -264,7 +264,7 @@ body:has(.update-bar:not([hidden])) .app { height: calc(100% - 40px); }
   min-height: 0;
   overflow: hidden;
 }
-.deck > .panel > :not(h2) { overflow-y: auto; min-height: 0; }
+.deck > .panel > :not(h2) { overflow-y: auto; overflow-x: hidden; min-height: 0; }
 .deck > .panel[hidden] { display: none; }
 
 /* 오른쪽 칸은 나무 판 — 판때기들이 그 위에 못 박혀 있는 것처럼 */
@@ -561,15 +561,23 @@ body:has(.update-bar:not([hidden])) .app { height: calc(100% - 40px); }
   cursor: grab;
   user-select: none;
   touch-action: none;
+  /* 예전엔 음수 여백으로 hover 배경을 판때기 끝까지 흘렸는데, 가로 넘침을
+     막으면서 그 부분이 잘려 나간다. 안쪽으로 들인다. */
   padding: 2px 4px;
-  margin: 0 -4px;
+  margin: 0;
   clip-path: var(--notch-sm);
   transition: background var(--calm), transform var(--press);
 }
 .tasks .task:hover { background: var(--paper-2); }
 .tasks .task:active { cursor: grabbing; transform: translate(1px, 1px); }
 .tasks .task.lifted { opacity: .3; transform: none; }
-.tasks .task b { font-weight: 700; color: var(--ink); }
+.tasks .task b {
+  font-weight: 700; color: var(--ink);
+  /* flex 아이템은 기본이 min-width:auto 라 글자가 안 줄어든다 — 0 으로
+     내려야 줄임표가 걸린다. */
+  min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .tasks .task span { font-variant-numeric: tabular-nums; flex: none; }
 .tasks .task.running b { color: var(--accent-dark); }
 .tasks .running-note {

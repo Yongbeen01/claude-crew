@@ -24,8 +24,7 @@ import {
  * partition between them rather than a gap.
  */
 
-/* 가로 간격. 3열이 한 덩어리로 읽히도록 좁게 — 세로(CELL_H)는 이름표가
- * 아랫줄을 침범하지 않을 만큼 그대로 둔다. */
+/** 한 자리가 차지하는 칸 — 러그와 히트박스의 크기. */
 const CELL_W = 78;
 const CELL_H = 96;
 /** Where a workstation sits inside its cell — the rug is sized to this, not to
@@ -36,11 +35,17 @@ const STAND_Y = 46; // floor point the person stands on
 const DESK_Y = 74; // front edge of the desk
 /** 책상 스프라이트의 세로 크기 (sprites.js desk 의 H). */
 const DESK_H = 30;
-/** 1행과 2행 사이 — 책상 두 개분. 남는 높이는 방이 갖는다. */
-const ROW_STEP = DESK_H * 2;
-/* Three across, so six seats are two rows rather than three. The stage is wide
- * and short — height is what the zoom is starved of, never width. */
-const CREW_COLS = 3;
+/**
+ * 책상 배치: 2열 3행.
+ *
+ * 구역 폭은 예전(3열 × 78)의 1.5배로 넓히고, 그 안에서 책상 덩어리를 가운데
+ * 정렬한다. 행 간격을 열 간격보다 조금 넓게 둔 건 사람 위에 이름표가 걸리기
+ * 때문이다 — 가로로 붙는 것보다 세로로 붙는 게 먼저 읽기 힘들어진다.
+ */
+const CREW_ZONE_W = Math.round(3 * CELL_W * 1.5);
+const COL_STEP = 110;
+const ROW_STEP = 118;
+const CREW_COLS = 2;
 
 const WALL_TOP = 42;
 const WALL = 4;
@@ -254,7 +259,7 @@ export class Office {
     const availH = Math.max(160, host.clientHeight);
 
     const crewRows = Math.ceil(this.seats / CREW_COLS);
-    const aiW = CREW_COLS * CELL_W;
+    const aiW = CREW_ZONE_W;
     const aiH = (crewRows - 1) * ROW_STEP + CELL_H;
 
     // Off Windows there is no way to enumerate what is open, so there is no
@@ -317,13 +322,23 @@ export class Office {
 
     const podCols = Math.max(1, Math.min(POD_COLS_MAX, Math.floor(winW / POD_W), podCount || 1));
     const podRows = Math.ceil(podCount / podCols);
-    // 가로로 먼저 채우되, 줄 수가 띠 높이를 넘으면 열을 늘려 더 촘촘히 접는다.
-    // 위 띠와 틈을 뺀 나머지. y0 는 아직 정해지기 전이라 쓰지 않는다 — 높이
-    // 차이만 필요하므로 원점은 몰라도 된다.
+    // 줄 수는 띠 높이가, 열 수는 띠 너비가 정한다 — 둘 다 지켜야 한다.
+    //
+    // 세로에 담으려고 열만 늘리면 그 열들이 가로를 넘어가서, 사람들이 방
+    // 바깥에 줄지어 서 있었다 (대화창을 넓히면 오른쪽 몇 명이 사라졌다).
+    // 열이 더 필요하면 늘리되, 간격을 좁혀 폭 안에 다시 밀어 넣는다.
     const looseBandH0 = zoneH - Math.max(88, Math.round(zoneH * GROUP_BAND)) - BAND_GAP;
     const rowsFit = Math.max(1, Math.floor((looseBandH0 - 8) / LOOSE_ROW_H));
-    let looseCols = Math.max(4, Math.floor((winW - 24) / LOOSE_STEP));
-    if (loose.length) looseCols = Math.max(looseCols, Math.ceil(loose.length / rowsFit));
+    const usableW = Math.max(60, winW - 28);
+    let looseCols = Math.max(1, Math.floor(usableW / LOOSE_STEP));
+    let looseStep = LOOSE_STEP;
+    if (loose.length) {
+      const need = Math.ceil(loose.length / rowsFit);
+      if (need > looseCols) {
+        looseCols = need;
+        looseStep = Math.max(18, Math.floor(usableW / looseCols));
+      }
+    }
     const looseRows = Math.ceil(loose.length / looseCols);
 
     const x0 = WALL + PAD;
@@ -333,15 +348,18 @@ export class Office {
     // Crew desks, spread down whatever height the zone ended up with — a room
     // that grew taller should give the desks more floor, not leave a strip of
     // bare wood under them.
-    // 줄 간격은 자리가 남는다고 늘리지 않는다 — 책상 두 개분으로 고정해
-    // 두 줄이 한 덩어리로 읽히게 하고, 남는 높이는 방의 다른 곳이 쓴다.
     const cellStepY = ROW_STEP;
+    // 책상 덩어리를 구역 한가운데에. 남는 바닥은 사방으로 고르게 남는다.
+    const blockW = (CREW_COLS - 1) * COL_STEP + CELL_W;
+    const blockH = (crewRows - 1) * cellStepY + CELL_H;
+    const aiX0 = x0 + Math.round((aiW - blockW) / 2);
+    const aiY0 = y0 + Math.max(0, Math.round((zoneH - blockH) / 2));
     const cells = [];
     for (let seat = 0; seat < this.seats; seat += 1) {
       const col = seat % CREW_COLS;
       const row = Math.floor(seat / CREW_COLS);
-      const x = x0 + col * CELL_W;
-      const y = Math.round(y0 + row * cellStepY);
+      const x = aiX0 + col * COL_STEP;
+      const y = Math.round(aiY0 + row * cellStepY);
       cells.push({ seat, x, y, cx: x + CELL_W / 2, standY: y + STAND_Y, deskY: y + DESK_Y });
     }
 
@@ -384,7 +402,7 @@ export class Office {
     const looseY0 = looseTop + Math.max(6, Math.round((looseBandH - looseBlockH) / 2));
     const seatsLoose = loose.map((p, n) => ({
       person: p,
-      x: winX + 14 + (n % looseCols) * LOOSE_STEP,
+      x: winX + 14 + (n % looseCols) * looseStep,
       y: looseY0 + Math.floor(n / looseCols) * LOOSE_ROW_H + 24,
     }));
 
