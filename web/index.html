@@ -112,6 +112,12 @@
             <span>알아서 하게 두기</span>
           </label>
         </div>
+        <!-- 이 사람만의 모델·생각 깊이. 바꾸면 같은 대화에 그대로 이어 붙습니다. -->
+        <div class="tuning">
+          <label><span>모델</span><select id="tune-model"></select></label>
+          <label><span>생각 깊이</span><select id="tune-effort"></select></label>
+          <small id="tune-note" class="tune-note"></small>
+        </div>
         <div id="attachments" class="attachments"></div>
         <div class="row">
           <textarea id="prompt" rows="2" placeholder="시킬 일을 적으세요.  (Enter 전송 · Shift+Enter 줄바꿈)"></textarea>
@@ -214,6 +220,11 @@
     <div class="types-body">
       <nav id="type-tabs" class="type-tabs"></nav>
       <div class="type-editor">
+        <!-- 이 유형을 부를 때 기본으로 쓰는 값. 부른 뒤에는 사람마다 따로 바꿀 수 있습니다. -->
+        <div class="type-defaults">
+          <label class="field"><span>기본 모델</span><select id="type-model"></select></label>
+          <label class="field"><span>기본 생각 깊이</span><select id="type-effort"></select></label>
+        </div>
         <label class="field">
           <span>이 유형의 성격 (system.md)</span>
           <textarea id="type-system" rows="10" spellcheck="false"></textarea>

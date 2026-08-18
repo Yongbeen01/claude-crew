@@ -71,12 +71,22 @@ export class Runner extends EventEmitter {
    * @param {string[]} [opts.pluginDirs]
    * @param {object} [opts.mcpServers]  merged into --mcp-config
    * @param {string} [opts.settingsJson] inline --settings payload
+   * @param {string} [opts.model]        overrides the type's default model
+   * @param {string} [opts.effort]       overrides the type's default effort
    */
   constructor(opts) {
     super();
     this.personId = opts.personId;
     this.persona = opts.persona;
     this.opts = opts;
+    /**
+     * What this one session runs on. It starts from the type's default and can
+     * then be changed for this person alone — a heavy job wants opus, a long
+     * cheap one wants haiku, and that is a per-person decision rather than a
+     * property of what they are.
+     */
+    this.model = opts.model || opts.persona?.model || config.defaultModel;
+    this.effort = opts.effort || opts.persona?.effort || null;
     this.sessionId = randomUUID();
     this.workdir = path.join(SESSIONS_DIR, this.personId);
     this.child = null;
@@ -147,11 +157,11 @@ export class Runner extends EventEmitter {
       // said so far (verified in scripts/spike/README.md), which is what lets
       // "지켜보기" be toggled mid-task instead of only at hire time.
       ...(this._resuming ? ['--resume', this.sessionId] : ['--session-id', this.sessionId]),
-      '--model', p.model || config.defaultModel,
+      '--model', this.model,
       '--permission-mode', p.permissionMode || 'default',
       '--add-dir', toPosix(this.workdir),
     ];
-    if (p.effort) args.push('--effort', p.effort);
+    if (this.effort) args.push('--effort', this.effort);
 
     const systemFile = this.writeSystemPrompt();
     if (systemFile) args.push('--append-system-prompt-file', toPosix(systemFile));
@@ -231,8 +241,10 @@ export class Runner extends EventEmitter {
    * the tool set has to change (attaching a visible browser), which the CLI
    * cannot do to a running session.
    */
-  async restart({ mcpServers } = {}) {
+  async restart({ mcpServers, model, effort } = {}) {
     if (mcpServers) this.opts.mcpServers = mcpServers;
+    if (model) this.model = model;
+    if (effort !== undefined) this.effort = effort;
     const old = this.child;
     this._restarting = true;
     if (old && old.exitCode === null) {
@@ -404,7 +416,12 @@ export class Runner extends EventEmitter {
       sessionId: this.sessionId,
       state: this.alive ? this.state : 'exited',
       alive: this.alive,
-      model: this.init?.model ?? this.persona?.model ?? null,
+      // What we asked for, and what the CLI says it actually resolved to. The
+      // picker has to show the first — `claude-opus-5[1m]` is not an option in
+      // any menu — but the second is the one that proves the change took.
+      model: this.model,
+      effort: this.effort,
+      resolvedModel: this.init?.model ?? null,
       turns: this.turns,
       lastActivityAt: this.lastActivityAt,
       lastText: this.lastText,

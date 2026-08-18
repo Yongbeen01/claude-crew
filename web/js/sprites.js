@@ -466,6 +466,17 @@ function headpiece(ctx, hx, headY, av) {
       px(ctx, hx - 1, headY - 3, 2, 1, spot);
       break;
     }
+    case 'director': {
+      const cap = '#33323a';
+      const capL = '#4a4855';
+      px(ctx, hx - 7, headY - 4, 14, 4, cap);   // crown
+      px(ctx, hx - 5, headY - 6, 10, 2, capL);
+      px(ctx, hx - 9, headY - 1, 18, 2, cap);   // a wide flat brim
+      // clapperboard ticks along the brim — at this size that one row of white
+      // is what says "영화" rather than "모자 쓴 사람"
+      for (let i = 0; i < 4; i += 1) px(ctx, hx - 8 + i * 5, headY - 1, 2, 1, '#f2eee2');
+      break;
+    }
     case 'designer': {
       const beret = '#c8484f';
       px(ctx, hx - 8, headY - 4, 15, 4, beret);

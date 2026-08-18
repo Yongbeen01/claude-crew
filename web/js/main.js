@@ -25,7 +25,7 @@ const store = {
   groups: [],
   /** 창을 다 닫은 뒤에도 남는 그룹 — 다시 열기 위한 레시피 */
   savedGroups: [],
-  meta: { maxSeats: 4 },
+  meta: { maxSeats: 4, models: [], efforts: [] },
   /** personId -> [{role, text, at}] */
   chats: new Map(),
   /** personId -> partial assistant text */
@@ -58,6 +58,9 @@ const el = {
   dismiss: document.getElementById('dismiss'),
   watch: document.getElementById('watch'),
   trust: document.getElementById('trust'),
+  tuneModel: document.getElementById('tune-model'),
+  tuneEffort: document.getElementById('tune-effort'),
+  tuneNote: document.getElementById('tune-note'),
   approvals: document.getElementById('approvals'),
   approvalsPanel: document.getElementById('approvals-panel'),
   activity: document.getElementById('activity'),
@@ -78,6 +81,8 @@ const el = {
   openTypes: document.getElementById('open-types'),
   types: document.getElementById('types'),
   typeTabs: document.getElementById('type-tabs'),
+  typeModel: document.getElementById('type-model'),
+  typeEffort: document.getElementById('type-effort'),
   typeSystem: document.getElementById('type-system'),
   skillPick: document.getElementById('skill-pick'),
   skillBody: document.getElementById('skill-body'),
@@ -418,6 +423,7 @@ function renderChat() {
   el.composer.hidden = false;
   el.watch.checked = !!person.watch;
   el.trust.checked = !!person.trusted;
+  syncTuning(person);
 
   // On the way out the composer stays visible but takes nothing: a message sent
   // now would either vanish or derail the handover, and a greyed-out box says
@@ -601,6 +607,91 @@ el.trust.addEventListener('change', async () => {
   await api(`/api/crew/${person.id}/trust`, { method: 'POST', body: { on: el.trust.checked } });
 });
 
+// ── 이 사람이 쓰는 모델 · 생각 깊이 ────────────────────────────────────────
+// 유형의 기본값에서 출발하지만, 앉아 있는 동안 이 사람만 따로 바꿀 수 있다.
+// 바꾸면 세션이 같은 대화에 다시 붙으므로 지금까지 한 이야기는 남는다.
+const MODEL_NOTE = { opus: '가장 똑똑함', sonnet: '기본', haiku: '가장 빠름' };
+const EFFORT_LABEL = { low: '낮음', medium: '보통', high: '높음', xhigh: '아주 높음', max: '최대' };
+const modelLabel = (m) => (MODEL_NOTE[m] ? `${m} · ${MODEL_NOTE[m]}` : m);
+const effortLabel = (e) => EFFORT_LABEL[e] ?? e;
+
+/** 서버가 주는 목록으로 채운다. 이미 같은 목록이면 손대지 않는다 — 매 프레임
+ *  옵션을 새로 만들면 펼쳐 둔 목록이 그때마다 닫힌다. */
+function fillPicker(select, values, label) {
+  const want = values.join(',');
+  if (select.dataset.built === want) return;
+  select.innerHTML = '';
+  for (const v of values) {
+    const o = document.createElement('option');
+    o.value = v;
+    o.textContent = label(v);
+    select.appendChild(o);
+  }
+  select.dataset.built = want;
+}
+
+/**
+ * 값이 목록에 없으면 자리표를 하나 만들어 그걸 고른 상태로 둔다.
+ *
+ * 안 그러면 브라우저가 첫 항목을 선택된 것처럼 그려서, 실제로는 지정이 없는
+ * 세션이 화면에서는 "낮음" 으로 보인다 — 화면이 사실과 다른 쪽이 제일 나쁘다.
+ */
+function syncPicker(select, value) {
+  const v = value ?? '';
+  if (v && ![...select.options].some((o) => o.value === v)) {
+    const o = document.createElement('option');
+    o.value = v;
+    o.textContent = v;
+    select.appendChild(o);
+  }
+  if (!v && !select.querySelector('option[value=""]')) {
+    const o = document.createElement('option');
+    o.value = '';
+    o.textContent = '지정 없음';
+    select.prepend(o);
+  }
+  if (select.value !== v) select.value = v;
+}
+
+/** 서버 왕복 중에는 화면을 되돌리지 않는다 — 방금 고른 값이 튀어 보인다. */
+let tuningBusy = false;
+
+function syncTuning(person) {
+  fillPicker(el.tuneModel, store.meta.models ?? [], modelLabel);
+  fillPicker(el.tuneEffort, store.meta.efforts ?? [], effortLabel);
+  if (tuningBusy) return;
+  const s = person.session;
+  syncPicker(el.tuneModel, s?.model);
+  syncPicker(el.tuneEffort, s?.effort);
+  const off = person.state === 'leaving' || person.state === 'exited';
+  el.tuneModel.disabled = off;
+  el.tuneEffort.disabled = off;
+}
+
+async function applyTuning() {
+  const person = selectedPerson();
+  if (!person) return;
+  tuningBusy = true;
+  el.tuneModel.disabled = true;
+  el.tuneEffort.disabled = true;
+  el.tuneNote.textContent = '바꾸는 중 — 하던 이야기는 그대로 이어집니다…';
+
+  const r = await api(`/api/crew/${person.id}/tuning`, {
+    method: 'POST',
+    body: { model: el.tuneModel.value, effort: el.tuneEffort.value },
+  });
+
+  tuningBusy = false;
+  el.tuneModel.disabled = false;
+  el.tuneEffort.disabled = false;
+  el.tuneNote.textContent = r.ok ? '' : (r.error ?? '바꾸지 못했습니다');
+  // 거절당했으면 고른 값이 아니라 실제로 돌고 있는 값을 보여줘야 한다.
+  renderChat();
+}
+
+el.tuneModel.addEventListener('change', applyTuning);
+el.tuneEffort.addEventListener('change', applyTuning);
+
 // The button and the door lead to the same place. Going out through the button
 // used to end the session on the spot, which threw away everything the person
 // had worked out — now both ask, and both hand over first.
@@ -724,9 +815,15 @@ function openHire(origin) {
     ctx.drawImage(bb, 0, 0, bb.width, bb.height, 0, 0, canvas.width, canvas.height);
 
     const text = document.createElement('div');
-    text.innerHTML = `<b></b><small></small>`;
+    text.innerHTML = `<b></b><small></small><small class="spec"></small>`;
     text.querySelector('b').textContent = p.label;
     text.querySelector('small').textContent = p.blurb || '';
+    // 무엇으로 돌아가는지는 부르기 전에 보여야 고르는 데 쓸모가 있다.
+    text.querySelector('.spec').textContent = [
+      p.model,
+      p.effort ? `생각 ${effortLabel(p.effort)}` : '',
+      p.watch ? '브라우저를 띄웁니다' : '',
+    ].filter(Boolean).join(' · ');
 
     btn.append(canvas, text);
     btn.addEventListener('click', () => hire(p.key));
@@ -830,6 +927,11 @@ async function loadType(key) {
   for (const b of el.typeTabs.children) b.classList.toggle('on', b.dataset.key === key);
   const persona = await api(`/api/personas/${encodeURIComponent(key)}`);
   editor.persona = persona;
+  // 이 유형을 부를 때의 기본값. 앉은 뒤에는 사람마다 대화창에서 따로 바꾼다.
+  fillPicker(el.typeModel, store.meta.models ?? [], modelLabel);
+  fillPicker(el.typeEffort, store.meta.efforts ?? [], effortLabel);
+  syncPicker(el.typeModel, persona.model);
+  syncPicker(el.typeEffort, persona.effort);
   el.typeSystem.value = persona.systemPrompt ?? '';
   el.skillPick.innerHTML = '';
   for (const s of persona.skills ?? []) {
@@ -878,9 +980,20 @@ el.typesSave.addEventListener('click', async () => {
   el.typesSave.disabled = true;
   if (editor.skill) editor.dirty.set(editor.skill, el.skillBody.value);
 
-  await api(`/api/personas/${encodeURIComponent(editor.key)}`, {
-    method: 'POST', body: { systemPrompt: el.typeSystem.value },
+  const meta = await api(`/api/personas/${encodeURIComponent(editor.key)}`, {
+    method: 'POST',
+    body: {
+      systemPrompt: el.typeSystem.value,
+      // 빈 값은 보내지 않는다 — 서버가 모르는 값이라며 저장 전체를 거절한다.
+      ...(el.typeModel.value ? { model: el.typeModel.value } : {}),
+      ...(el.typeEffort.value ? { effort: el.typeEffort.value } : {}),
+    },
   });
+  if (meta && meta.ok === false) {
+    el.typesSave.disabled = false;
+    el.typeSaved.textContent = meta.error ?? '저장하지 못했습니다';
+    return;
+  }
   for (const [name, body] of editor.dirty) {
     await api(`/api/personas/${encodeURIComponent(editor.key)}/skills/${encodeURIComponent(name)}`, {
       method: 'POST', body: { body },

@@ -11,6 +11,7 @@ import { briefing } from './jobs.js';
 import * as approvals from './approvals.js';
 import { forgetSummary } from './summarize.js';
 import { handover } from './handover.js';
+import { ensureGroup } from './toolbox.js';
 
 /**
  * Who is sitting in the office right now.
@@ -211,7 +212,7 @@ function wireRunner(person) {
 /**
  * Seat a new person and start their Claude session.
  * @param {string} personaKey
- * @param {{watch?: boolean, appendSystemPrompt?: string, mcpServers?: object, settingsJson?: string, jobName?: string}} [opts]
+ * @param {{watch?: boolean, appendSystemPrompt?: string, mcpServers?: object, settingsJson?: string, jobName?: string, model?: string, effort?: string}} [opts]
  */
 export function hire(personaKey, opts = {}) {
   const persona = loadPersona(personaKey);
@@ -220,12 +221,19 @@ export function hire(personaKey, opts = {}) {
   const seat = nextSeat();
   if (seat < 0) throw new Error(`자리가 다 찼습니다 (최대 ${config.maxSeats}명)`);
 
+  // Whatever this type needs beyond the shared document packages. Started, not
+  // waited on: the person sits down now and their skill knows to say so if the
+  // tool is not there yet.
+  for (const group of persona.toolbox) ensureGroup(group);
+
   const person = new Person({
     id: randomUUID(),
     personaKey,
     name: nextName(personaKey),
     seat,
-    watch: opts.watch,
+    // A type may need the visible browser to do its job at all (영화감독 watches
+    // the video in it), so it can ask for one. The checkbox can only add.
+    watch: opts.watch === true || persona.watch === true,
   });
   person.persona = persona;
   person.jobName = opts.jobName ?? null;
@@ -238,6 +246,8 @@ export function hire(personaKey, opts = {}) {
   person.runner = new Runner({
     personId: person.id,
     persona,
+    model: pickModel(opts.model),
+    effort: pickEffort(opts.effort),
     appendSystemPrompt: [brief, opts.appendSystemPrompt].filter(Boolean).join('\n\n'),
     pluginDirs: [persona.dir],
     mcpServers: {
@@ -446,6 +456,55 @@ function browserMcp(person) {
       ],
     },
   };
+}
+
+/**
+ * Only ever hand argv something the CLI knows.
+ *
+ * A bad `--effort` is not refused — it warns on stderr and quietly falls back to
+ * the default, so the office would go on displaying a setting nobody is running
+ * under. An empty return means "no override", which leaves the type's default.
+ */
+function pickModel(v) {
+  const s = String(v ?? '').trim();
+  return config.models.includes(s) ? s : null;
+}
+
+function pickEffort(v) {
+  const s = String(v ?? '').trim();
+  return config.efforts.includes(s) ? s : null;
+}
+
+/**
+ * Change what this one person runs on, mid-session.
+ *
+ * The CLI cannot re-tune a live session, so the process is swapped for one
+ * resuming the same conversation — the same move as attaching a browser, and
+ * the person keeps everything said so far.
+ *
+ * Refused while they are working: a restart drops whatever is in flight, and
+ * `--resume` would then pick the conversation back up *without* the answer to
+ * the question just asked. Losing a turn silently is worse than waiting.
+ */
+export async function setTuning(id, { model, effort } = {}) {
+  const person = people.get(id);
+  if (!person?.runner) return { ok: false, error: 'unknown person' };
+
+  const nextModel = pickModel(model) ?? person.runner.model;
+  const nextEffort = pickEffort(effort) ?? person.runner.effort;
+  if (nextModel === person.runner.model && nextEffort === person.runner.effort) {
+    return { ok: true, model: nextModel, effort: nextEffort };
+  }
+  if (person.leavingAt) return { ok: false, error: '나가는 중입니다' };
+  if (person.runner.state === 'working') {
+    return { ok: false, error: '지금 일하는 중이라 바꾸지 못합니다. 끝나면 바꿔주세요.' };
+  }
+
+  logActivity('model', `${person.name} — ${nextModel}${nextEffort ? ` · ${nextEffort}` : ''}`, id);
+  announce();
+  await person.runner.restart({ model: nextModel, effort: nextEffort });
+  announce();
+  return { ok: true, model: nextModel, effort: nextEffort };
 }
 
 export async function setWatch(id, on) {

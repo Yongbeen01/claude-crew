@@ -130,6 +130,10 @@ function fullState() {
       now: Date.now(),
       maxSeats: config.maxSeats,
       version: readVersion(),
+      // The pickers are built from this rather than from a list in the page, so
+      // a config edit reaches the UI without a second place to remember.
+      models: config.models,
+      efforts: config.efforts,
     },
   };
 }
@@ -154,6 +158,7 @@ function publicPersona(p) {
     sprite: p.sprite,
     model: p.model,
     effort: p.effort,
+    watch: p.watch,
     strictMcp: p.strictMcp,
     kickoff: p.kickoff,
     systemPrompt: p.systemPrompt,
@@ -236,7 +241,12 @@ export function createServer() {
     if (p === '/api/crew' && req.method === 'POST') {
       const body = await readBody(req);
       try {
-        const person = crew.hire(String(body.personaKey ?? ''), { watch: body.watch === true });
+        const person = crew.hire(String(body.personaKey ?? ''), {
+          watch: body.watch === true,
+          // Unknown or absent falls back to the type's own default.
+          model: body.model,
+          effort: body.effort,
+        });
         return json(res, 200, { ok: true, person: person.toJSON() });
       } catch (err) {
         return json(res, 400, { ok: false, error: err.message });
@@ -279,6 +289,13 @@ export function createServer() {
       }
       if (sub === 'transcript') {
         return json(res, 200, { personId: id, entries: crew.transcript(id) });
+      }
+      // 이 사람만 모델·생각 깊이 바꾸기. Restarts onto the same conversation, so
+      // it takes a moment and is refused mid-turn (see crew.setTuning).
+      if (sub === 'tuning' && req.method === 'POST') {
+        const body = await readBody(req);
+        const r = await crew.setTuning(id, { model: body.model, effort: body.effort });
+        return json(res, r.ok ? 200 : 409, r);
       }
       if (sub === 'watch' && req.method === 'POST') {
         const body = await readBody(req);

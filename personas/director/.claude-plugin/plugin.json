@@ -1,0 +1,5 @@
+{
+  "name": "crew-director",
+  "description": "claude-crew 영화감독 유형의 스킬 팩 — 영상을 실제로 열어 보고 내용을 읽어 냅니다.",
+  "version": "0.1.0"
+}

@@ -993,6 +993,21 @@ button.ghost:active { box-shadow: inset 0 0 0 3px var(--wood-dark), inset 0 -3px
 .watch:active { color: var(--ink); }
 .toggles { display: flex; gap: 14px; flex-wrap: wrap; }
 
+/* 이 사람만의 모델 · 생각 깊이 */
+.tuning { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.tuning label {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11px; font-weight: 700; color: var(--wood);
+}
+/* 이름은 줄어들지 않고, 남는 폭은 목록이 가져간다 */
+.tuning label > span { flex: none; }
+.tuning select { min-width: 96px; }
+.tuning select:disabled { opacity: .55; cursor: default; }
+.tune-note { flex: 1 1 100%; font-size: 11px; font-weight: 600; color: var(--bad-dark); }
+
+/* 유형의 기본값 — 나란히 두 칸 */
+.type-defaults { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
 /* ── approvals ─────────────────────────────────────────────────────────── */
 .approvals-panel { background: #ffe6df; }
 .approvals-panel h2 { color: var(--bad-dark); }
@@ -1203,6 +1218,8 @@ button.danger:hover { background: var(--bad); color: #fff0ec; }
 .persona canvas { image-rendering: pixelated; }
 .persona b { display: block; font-size: 13px; font-weight: 800; }
 .persona small { color: var(--ink-mute); font-size: 11px; font-weight: 600; }
+/* 무엇으로 돌아가는지 — 설명보다 한 단계 조용하게 */
+.persona .spec { display: block; margin-top: 2px; color: var(--wood); font-size: 10px; letter-spacing: .02em; }
 
 /* ── type + skill editor ───────────────────────────────────────────────── */
 button.tiny { padding: 4px 10px; font-size: 11px; }
@@ -1253,7 +1270,9 @@ button.tiny { padding: 4px 10px; font-size: 11px; }
 .skills-head { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 700; color: var(--wood); }
 /* The native dropdown arrow is the one piece of OS chrome that would show
    through, so it is replaced with a drawn triangle. */
-.skills-head select {
+.skills-head select,
+.tuning select,
+.type-defaults select {
   flex: 1;
   appearance: none; -webkit-appearance: none;
   background: var(--paper-hi);

@@ -35,6 +35,18 @@ const DEFAULTS = {
   /** default model per spawned person unless the persona overrides it */
   defaultModel: 'sonnet',
 
+  /**
+   * What the 모델 / 생각 깊이 pickers offer.
+   *
+   * The effort levels are the CLI's own — it names them itself when handed a
+   * bad one ("Valid values: low, medium, high, xhigh, max"). Keep this list in
+   * step with that, because an unknown value is not refused: it is warned about
+   * on stderr and silently replaced by the default, which would leave the office
+   * showing a setting the session is not actually running under.
+   */
+  models: ['opus', 'sonnet', 'haiku'],
+  efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+
   /** `claude` binary. Only ever run as a child process; never handed credentials. */
   claudeBin: process.env.CLAUDE_BIN || 'claude',
 

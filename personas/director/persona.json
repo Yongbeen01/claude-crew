@@ -1,0 +1,12 @@
+{
+  "label": "영화감독",
+  "blurb": "영상을 보고 무슨 내용인지 알려줍니다.",
+  "sprite": "director",
+  "model": "opus",
+  "effort": "low",
+  "permissionMode": "default",
+  "strictMcp": true,
+  "watch": true,
+  "toolbox": ["video"],
+  "kickoff": "당신은 방금 자리에 앉았습니다. 사용자에게 한 문장으로 인사하고, 볼 영상의 링크를 주거나 파일을 붙여 달라고 하세요. 할 수 있는 일을 나열하지 마세요."
+}

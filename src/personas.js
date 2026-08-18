@@ -85,6 +85,10 @@ export function loadPersona(key) {
     model: meta.model ?? config.defaultModel,
     effort: meta.effort ?? null,
     permissionMode: meta.permissionMode ?? 'default',
+    /** this type cannot do its job without the visible browser (영화감독) */
+    watch: meta.watch === true,
+    /** toolbox groups this type needs — fetched the first time one is hired */
+    toolbox: Array.isArray(meta.toolbox) ? meta.toolbox : [],
     tools: meta.tools ?? null,
     allowedTools: meta.allowedTools ?? null,
     disallowedTools: meta.disallowedTools ?? null,
@@ -172,6 +176,15 @@ export function savePersonaMeta(key, patch) {
   const file = path.join(PERSONAS_DIR, key, 'persona.json');
   const current = readJson(file);
   if (!current) throw new Error('unknown persona');
+  // A model or effort the CLI does not know would not fail loudly — it warns on
+  // stderr and runs on the default — so a bad default has to be refused here,
+  // where someone is still around to be told.
+  if ('model' in patch && !config.models.includes(String(patch.model))) {
+    throw new Error(`모르는 모델입니다: ${patch.model}`);
+  }
+  if ('effort' in patch && !config.efforts.includes(String(patch.effort))) {
+    throw new Error(`모르는 생각 깊이입니다: ${patch.effort}`);
+  }
   const allowed = ['label', 'blurb', 'model', 'effort', 'permissionMode', 'kickoff', 'strictMcp', 'sprite'];
   const next = { ...current };
   for (const k of allowed) if (k in patch) next[k] = patch[k];
