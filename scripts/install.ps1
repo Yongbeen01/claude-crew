@@ -160,8 +160,19 @@ Invoke-Script 'scripts\install-shortcut.ps1'
 
 # ── 6. 로그인 ────────────────────────────────────────────────────────────────
 Step 'Claude 로그인 확인'
+# `claude auth status` 는 JSON 을 뱉습니다 ({"loggedIn": true, ...}). 예전처럼
+# 문장에서 '로그인 안 됨' 을 찾으면 로그인하지 않은 사람도 걸리지 않아서, 정작
+# 처음 설치하는 사람만 로그인 단계를 건너뛰고 앱이 조용히 안 됩니다.
+# 판단이 안 서면 로그인을 권하는 쪽으로 기웁니다 — 이미 된 사람이 한 번 더 보는
+# 것보다, 안 된 사람이 그냥 넘어가는 쪽이 훨씬 나쁩니다.
 $auth = (claude auth status 2>&1 | Out-String)
-if ($auth -match 'not logged in|No .*credential|로그인이 필요') {
+$loggedIn = $false
+try {
+  $loggedIn = [bool](($auth | ConvertFrom-Json).loggedIn)
+} catch {
+  $loggedIn = [bool]($auth -match 'logged in as|이미 로그인')
+}
+if (-not $loggedIn) {
   Warn '아직 로그인되어 있지 않습니다.'
   Say '이 앱은 여러분의 Claude 구독으로 동작합니다 (API 키를 쓰지 않습니다).'
   Say '지금 로그인 창을 엽니다 — 끝나면 이 창으로 돌아오세요.'
