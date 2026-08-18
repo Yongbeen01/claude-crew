@@ -1580,6 +1580,86 @@ deckResizer.addEventListener('keydown', (e) => {
   e.preventDefault();
 });
 
+// ── how wide each status panel is ────────────────────────────────────────
+/**
+ * The panels hold different things — a list of today's work needs more room
+ * than a pair of progress bars — so each one's width is its own, set by
+ * dragging its right edge and remembered from then on.
+ *
+ * Stored per panel id, so adding a panel later does not disturb the others.
+ */
+const PANEL_KEY = 'crew.panelWidths';
+
+function readPanelWidths() {
+  try { return JSON.parse(localStorage.getItem(PANEL_KEY) ?? '{}') ?? {}; } catch { return {}; }
+}
+
+function savePanelWidth(id, px) {
+  try {
+    const all = readPanelWidths();
+    if (px === null) delete all[id];
+    else all[id] = px;
+    localStorage.setItem(PANEL_KEY, JSON.stringify(all));
+  } catch { /* private mode */ }
+}
+
+/** Wide enough to read, never so wide it becomes the whole strip. */
+function clampPanel(px) {
+  return Math.round(Math.max(180, Math.min(760, px)));
+}
+
+function addPanelGrips() {
+  const saved = readPanelWidths();
+  for (const panel of document.querySelectorAll('.deck > .panel[id]')) {
+    if (saved[panel.id]) panel.style.setProperty('--panel-w', `${saved[panel.id]}px`);
+    if (panel.querySelector('.panel-grip')) continue;
+
+    const grip = document.createElement('div');
+    grip.className = 'panel-grip';
+    grip.title = '끌어서 이 칸의 너비 조절 · 더블클릭하면 원래대로';
+    panel.appendChild(grip);
+
+    grip.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const id = e.pointerId;
+      const startX = e.clientX;
+      const startW = panel.getBoundingClientRect().width;
+      grip.classList.add('dragging');
+      document.body.classList.add('resizing');
+      try { grip.setPointerCapture(id); } catch { /* capture is a nicety */ }
+
+      // Width from the drag distance, not from the pointer's absolute position:
+      // the panel can be scrolled sideways mid-drag, and its left edge moves.
+      const move = (ev) => {
+        if (ev.pointerId !== id) return;
+        panel.style.setProperty('--panel-w', `${clampPanel(startW + (ev.clientX - startX))}px`);
+      };
+      const up = (ev) => {
+        if (ev && ev.pointerId !== id) return;
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+        window.removeEventListener('pointercancel', up);
+        grip.classList.remove('dragging');
+        document.body.classList.remove('resizing');
+        savePanelWidth(panel.id, clampPanel(panel.getBoundingClientRect().width));
+        syncDeckArrows();
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+      window.addEventListener('pointercancel', up);
+    });
+
+    grip.addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      panel.style.removeProperty('--panel-w');
+      savePanelWidth(panel.id, null);
+      syncDeckArrows();
+    });
+  }
+}
+
 // ── the deck's ends ──────────────────────────────────────────────────────
 /**
  * The status strip runs wider than the screen, and a horizontal scrollbar in a
@@ -1603,7 +1683,9 @@ window.addEventListener('resize', syncDeckArrows);
 // Panels appear and disappear as work arrives, so the strip's width is not
 // fixed — watch it rather than checking once.
 new ResizeObserver(syncDeckArrows).observe(el.deck);
-new MutationObserver(syncDeckArrows).observe(el.deck, { childList: true, attributes: true, subtree: true });
+new MutationObserver(() => { addPanelGrips(); syncDeckArrows(); })
+  .observe(el.deck, { childList: true, attributes: true, subtree: true });
+addPanelGrips();
 
 // ── loop ─────────────────────────────────────────────────────────────────
 let last = 0;

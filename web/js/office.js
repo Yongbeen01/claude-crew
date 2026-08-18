@@ -34,6 +34,10 @@ const RUG_TOP = 22;
 const RUG_H = 56;
 const STAND_Y = 46; // floor point the person stands on
 const DESK_Y = 74; // front edge of the desk
+/** 책상 스프라이트의 세로 크기 (sprites.js desk 의 H). */
+const DESK_H = 30;
+/** 1행과 2행 사이 — 책상 두 개분. 남는 높이는 방이 갖는다. */
+const ROW_STEP = DESK_H * 2;
 /* Three across, so six seats are two rows rather than three. The stage is wide
  * and short — height is what the zoom is starved of, never width. */
 const CREW_COLS = 3;
@@ -251,7 +255,7 @@ export class Office {
 
     const crewRows = Math.ceil(this.seats / CREW_COLS);
     const aiW = CREW_COLS * CELL_W;
-    const aiH = crewRows * CELL_H;
+    const aiH = (crewRows - 1) * ROW_STEP + CELL_H;
 
     // Off Windows there is no way to enumerate what is open, so there is no
     // second zone — the room is just the desks and the door rather than a large
@@ -284,16 +288,22 @@ export class Office {
       const winWant = showWin ? Math.max(WIN_MIN_W, cols * POD_W) : 0;
       const lCols = Math.max(4, Math.floor((winWant - 24) / LOOSE_STEP));
       const ww = chromeW + winWant;
-      // 두 띠가 각자 자기 몫(56% / 44%) 안에 들어가야 하므로, 필요한 전체
-      // 높이는 "더 빡빡한 쪽이 요구하는 높이" 다.
+      // 위 띠(테이블)만 방 높이를 요구한다. 대기 인원까지 여기에 넣으면,
+      // 창이 15개만 열려 있어도 방이 무대보다 커져서 통째로 축소돼 버렸다 —
+      // 대기 인원은 방을 키울 게 아니라 띠 안에서 줄을 접으면 되는 것이다.
       const wantPod = Math.ceil(podCount / cols) * POD_H;
-      const wantLoose = Math.ceil(loose.length / lCols) * LOOSE_ROW_H;
+
       const hh = chromeH + Math.max(
         aiH, ZONE_MIN_H,
         Math.round(wantPod / GROUP_BAND) + BAND_GAP,
-        Math.round(wantLoose / (1 - GROUP_BAND)) + BAND_GAP,
       );
-      const s = Math.max(1, Math.min(MAX_SCALE, Math.floor(Math.min(availW / ww, availH / hh))));
+      // Whole-number zoom keeps the pixels hard, and that is what we want
+      // whenever the room fits. But a short window could not be served by any
+      // whole number ≥ 1 — the smallest room simply did not fit, and the bottom
+      // of it was cut off by the stage. Below 1× we take the exact ratio
+      // instead: a slightly soft room beats a room with its floor missing.
+      const raw = Math.min(availW / ww, availH / hh);
+      const s = raw >= 1 ? Math.min(MAX_SCALE, Math.floor(raw)) : raw;
       if (!best || s > best.s) best = { s, ww, hh };
       if (cols >= podCount) break;
     }
@@ -307,7 +317,13 @@ export class Office {
 
     const podCols = Math.max(1, Math.min(POD_COLS_MAX, Math.floor(winW / POD_W), podCount || 1));
     const podRows = Math.ceil(podCount / podCols);
-    const looseCols = Math.max(4, Math.floor((winW - 24) / LOOSE_STEP));
+    // 가로로 먼저 채우되, 줄 수가 띠 높이를 넘으면 열을 늘려 더 촘촘히 접는다.
+    // 위 띠와 틈을 뺀 나머지. y0 는 아직 정해지기 전이라 쓰지 않는다 — 높이
+    // 차이만 필요하므로 원점은 몰라도 된다.
+    const looseBandH0 = zoneH - Math.max(88, Math.round(zoneH * GROUP_BAND)) - BAND_GAP;
+    const rowsFit = Math.max(1, Math.floor((looseBandH0 - 8) / LOOSE_ROW_H));
+    let looseCols = Math.max(4, Math.floor((winW - 24) / LOOSE_STEP));
+    if (loose.length) looseCols = Math.max(looseCols, Math.ceil(loose.length / rowsFit));
     const looseRows = Math.ceil(loose.length / looseCols);
 
     const x0 = WALL + PAD;
@@ -317,7 +333,9 @@ export class Office {
     // Crew desks, spread down whatever height the zone ended up with — a room
     // that grew taller should give the desks more floor, not leave a strip of
     // bare wood under them.
-    const cellStepY = Math.max(CELL_H, zoneH / crewRows);
+    // 줄 간격은 자리가 남는다고 늘리지 않는다 — 책상 두 개분으로 고정해
+    // 두 줄이 한 덩어리로 읽히게 하고, 남는 높이는 방의 다른 곳이 쓴다.
+    const cellStepY = ROW_STEP;
     const cells = [];
     for (let seat = 0; seat < this.seats; seat += 1) {
       const col = seat % CREW_COLS;
