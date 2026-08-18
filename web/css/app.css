@@ -180,17 +180,28 @@ body:has(.update-bar:not([hidden])) .app { height: calc(100% - 40px); }
 
 /* 상태 섹션들: 좁고 긴 칸이 아니라 넓고 낮은 띠에 놓이므로, 세로로 쌓지 않고
  * 나란히 세운다. 각 판때기는 그 안에서만 세로로 스크롤한다. */
-.deck-wrap { position: relative; min-height: 0; }
-.deck {
+/* `min-width: 0` is what makes the strip scroll at all.
+ *
+ * A grid item defaults to `min-width: auto`, which is "as wide as my contents":
+ * the wrapper grew to 2014px inside a 1158px column, so the strip was never
+ * narrower than its own content, never overflowed, never scrolled — and the
+ * arrows, which appear only when there is somewhere to go, never appeared.
+ * The panels past the edge were simply clipped away. */
+.deck-wrap {
   --deck-gutter: 44px;
+  position: relative;
+  min-height: 0; min-width: 0;
+  overflow: hidden;
+  /* 화살표가 앉을 통로 — 스크롤 영역 바깥이라 어느 위치로 밀어도 겹치지 않는다 */
+  padding: 0 var(--deck-gutter);
+}
+.deck {
   height: 100%;
   display: grid;
   grid-auto-flow: column;
   grid-auto-columns: minmax(232px, 1fr);
   gap: 10px;
-  /* 양 끝에 화살표가 앉을 자리를 비워 둔다 — 맨 앞이나 맨 끝까지 밀었을 때
-     판때기가 화살표 밑으로 들어가지 않도록. */
-  padding: 0 var(--deck-gutter) 12px;
+  padding: 0 0 12px;
   overflow-x: auto;
   overflow-y: hidden;
   align-items: stretch;
@@ -596,6 +607,10 @@ body:has(.update-bar:not([hidden])) .app { height: calc(100% - 40px); }
 
 .system { display: grid; gap: 7px; }
 .system .row { display: flex; justify-content: space-between; font-size: 12px; font-weight: 600; }
+/* 값 옆에 그 값을 바꾸는 버튼이 붙는 줄 */
+.system .row.with-action { align-items: center; gap: 10px; }
+.system .row.with-action > span:last-child { margin-left: auto; }
+.system .row.with-action > button { flex: none; }
 .system .row span:last-child { color: var(--ink-dim); font-variant-numeric: tabular-nums; }
 
 /* ── activity ──────────────────────────────────────────────────────────── */

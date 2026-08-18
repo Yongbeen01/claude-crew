@@ -950,6 +950,15 @@ function renderWindows() {
     const b = document.createElement('span');
     b.textContent = v;
     row.append(a, b);
+    // "새 그룹" belongs beside the count it changes, not stranded at the foot
+    // of the panel where it reads as being about the whole panel.
+    if (k === '그룹') {
+      row.classList.add('with-action');
+      el.groupNew.hidden = false;
+      // 값이 아니라 '그룹' 글자 바로 옆에. 맨 오른쪽에 두면 무엇에 대한
+      // 버튼인지 한 칸 건너 읽어야 한다.
+      a.after(el.groupNew);
+    }
     el.windowsSummary.appendChild(row);
   }
 }

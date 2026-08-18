@@ -68,7 +68,9 @@ const POD_COLS_MAX = 4;
 /* 대기 구역의 사람 간격. 이름표가 창 이름을 달고 있어서 30px 로는 라벨이
  * 서로를 덮었다 — 글자가 읽히는 폭까지 벌린다. */
 const LOOSE_STEP = 90;
-const LOOSE_ROW_H = 44;
+/* 줄 간격. 가로(90)와 비슷하되 조금 좁게 — 이름표가 윗줄 사람 발치에 닿지
+ * 않을 만큼만. */
+const LOOSE_ROW_H = 72;
 /**
  * The floor under the windows zone, not its usual size — it grows into whatever
  * the stage has spare. Keeping the floor low is what lets the whole room land
@@ -962,7 +964,10 @@ export class Office {
     }
     // The waiting area is a dense row, so its labels alternate above and below
     // the heads rather than sharing one line.
-    g.win.loose.forEach((s, i) => place(s.person, s.x, s.y, i % 2 === 1));
+    // 전부 머리 위에. 30px 로 붙어 있을 땐 한 칸 걸러 아래로 내려야 이름표가
+    // 안 겹쳤는데, 이제 가로로 충분히 벌려서 그럴 이유가 없어졌다 — 한 줄에
+    // 이름표가 나란히 있는 편이 훨씬 읽기 쉽다.
+    g.win.loose.forEach((s) => place(s.person, s.x, s.y, false));
 
     for (const [key, el] of this.winPlates) {
       if (seen.has(key)) continue;
