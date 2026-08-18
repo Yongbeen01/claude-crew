@@ -62,6 +62,15 @@ const DOOR_H = 34;
 const MAX_SCALE = 5;
 
 /**
+ * 사람과 책상만 방보다 한 뼘 크게. 방(바닥·벽·테이블)은 그대로 두고 이 둘만
+ * 키우면 화면에서 눈이 가야 할 곳이 커진다.
+ */
+const SPRITE_SCALE = 1.25;
+const bigChar = (c, x, y, av, o = {}) => character(c, x, y, av, { ...o, scale: SPRITE_SCALE });
+const bigDesk = (c, x, y, o = {}) => desk(c, x, y, { ...o, scale: SPRITE_SCALE });
+const bigEmptyDesk = (c, x, y, o = {}) => emptyDesk(c, x, y, { ...o, scale: SPRITE_SCALE });
+
+/**
  * Windows zone geometry.
  *
  * These numbers are chosen for the *shape* of the room, not just to fit the
@@ -555,7 +564,7 @@ export class Office {
 
       if (!person) {
         chair(ctx, a.cx, a.standY + 4, '#5a5f6e');
-        emptyDesk(ctx, a.cx, a.deskY, { hover: this.hoverSeat === a.seat });
+        bigEmptyDesk(ctx, a.cx, a.deskY, { hover: this.hoverSeat === a.seat });
         this.hitboxes.push({ kind: 'seat', seat: a.seat, person: null, x: a.x, y: a.y, w: CELL_W, h: CELL_H });
         continue;
       }
@@ -623,7 +632,7 @@ export class Office {
         ? Math.sin(t * 9) * 0.9
         : sleeping ? 2 : Math.sin(t * (working ? 3.2 : 1.4)) * (working ? 0.8 : 0.5);
       const blink = !sleeping && Math.sin(t * 0.9 + av.phase * 10) > 0.985;
-      const headY = character(ctx, a.cx, a.standY, av, {
+      const headY = bigChar(ctx, a.cx, a.standY, av, {
         bob,
         blink: blink || sleeping,
         typing: working && !crying ? t * 7 : 0,
@@ -655,7 +664,7 @@ export class Office {
       }
     }
 
-    desk(ctx, a.cx, a.deskY, {
+    bigDesk(ctx, a.cx, a.deskY, {
       screen: look.screen,
       accent: look.accent,
       scan: look.scan ? (now / 60) % 15 : 0,
@@ -728,7 +737,7 @@ export class Office {
     // 터벅터벅: a slow cadence with a heavy landing, not a walk cycle.
     const cadence = (now / 1000) * 4.4;
     const alpha = leaving.phase === 'gone' ? Math.max(0, 1 - leaving.k) : 1;
-    character(ctx, Math.round(pos.x), Math.round(pos.y), av, {
+    bigChar(ctx, Math.round(pos.x), Math.round(pos.y), av, {
       alpha,
       step: cadence,
       droop: 1,
@@ -836,7 +845,7 @@ export class Office {
     const t = now / 1000 + av.phase * 6;
     // Minimized is asleep: the window is still yours, it just is not on screen.
     const asleep = person.minimized;
-    character(ctx, Math.round(x), Math.round(y), av, {
+    bigChar(ctx, Math.round(x), Math.round(y), av, {
       bob: asleep ? 2 : Math.sin(t * 1.3) * 0.5,
       blink: asleep || Math.sin(t * 0.9 + av.phase * 10) > 0.985,
       alpha: asleep ? 0.5 : 1,
@@ -859,7 +868,7 @@ export class Office {
       if (!person) return;
       const av = avatarOf(person.seed, person.sprite);
       // Held up by the scruff: feet dangling, arms out.
-      character(ctx, Math.round(d.x), Math.round(d.y + 14), av, {
+      bigChar(ctx, Math.round(d.x), Math.round(d.y + 14), av, {
         bob: Math.sin(t * 8) * 1.2,
         step: t * 7,
         armLift: 0.5,
@@ -869,7 +878,7 @@ export class Office {
     }
     const person = this.windowPeople.find((p) => p.key === d.key);
     if (!person) return;
-    character(ctx, Math.round(d.x), Math.round(d.y + 12), avatarOf(hash(person.key), ''), {
+    bigChar(ctx, Math.round(d.x), Math.round(d.y + 12), avatarOf(hash(person.key), ''), {
       bob: Math.sin(t * 8) * 1.2,
       step: t * 7,
       badge: this._hueFor(person.app),

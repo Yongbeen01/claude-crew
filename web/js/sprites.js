@@ -236,7 +236,7 @@ export function chair(ctx, cx, cy, color = '#454c5e') {
 }
 
 /** An empty desk — the click target for hiring someone into that seat. */
-export function emptyDesk(ctx, cx, cy, { hover = false } = {}) {
+function drawEmptyDesk(ctx, cx, cy, { hover = false } = {}) {
   desk(ctx, cx, cy, { screen: '#1a1d22', accent: '#3a3f4c', scan: 0 });
   const y = cy - 30;
   ctx.save();
@@ -253,7 +253,7 @@ export function emptyDesk(ctx, cx, cy, { hover = false } = {}) {
  * sits behind it, so the surface is drawn after the character and hides
  * everything below their chest.
  */
-export function desk(ctx, cx, cy, { screen = '#1b2430', accent = '#7fd1c0', scan = 0, lamp = null } = {}) {
+function drawDesk(ctx, cx, cy, { screen = '#1b2430', accent = '#7fd1c0', scan = 0, lamp = null } = {}) {
   const W = 76;
   const H = 30;
   const x = cx - W / 2;
@@ -484,7 +484,7 @@ function headpiece(ctx, hx, headY, av) {
  * A worker facing the viewer. (cx, cy) is the floor point under them.
  * 26px tall, 18px wide with arms.
  */
-export function character(ctx, cx, cy, av, opts = {}) {
+function drawCharacter(ctx, cx, cy, av, opts = {}) {
   const {
     bob = 0,
     blink = false,
@@ -663,4 +663,64 @@ export function bubble(ctx, cx, cy, glyph, bg = '#ffffff', fg = '#2b2b33') {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(glyph, cx, cy - h / 2 + 1);
+}
+
+// ── 스프라이트 확대 ────────────────────────────────────────────────────────
+/**
+ * 캐릭터와 책상만 조금 크게 그린다.
+ *
+ * `ctx.scale()` 로 키우면 안 된다. px() 는 좌표를 정수로 반올림한 *뒤* 그리는데,
+ * 그 정수에 1.25 를 곱하면 소수 좌표가 되어 back-buffer 단계에서 이미 가장자리가
+ * 뭉개진다 — 이 화면의 전제("픽셀은 단단하다")가 거기서 깨진다.
+ *
+ * 그래서 1× 로 한 번 그린 뒤 최근접 이웃으로 확대해 붙인다. 픽셀 몇 줄이
+ * 두 번씩 찍히지만 가장자리는 여전히 칼같다 — 픽셀 아트를 정수배가 아닌 배율로
+ * 키울 때 쓰는 방법 그대로다.
+ */
+const SCRATCH = typeof document === 'undefined' ? null : document.createElement('canvas');
+const SCRATCH_CTX = SCRATCH?.getContext('2d') ?? null;
+
+function blitScaled(ctx, w, h, ox, oy, dx, dy, s, draw) {
+  if (SCRATCH.width < w) SCRATCH.width = w;
+  if (SCRATCH.height < h) SCRATCH.height = h;
+  SCRATCH_CTX.clearRect(0, 0, SCRATCH.width, SCRATCH.height);
+  const out = draw(SCRATCH_CTX, ox, oy);
+  const was = ctx.imageSmoothingEnabled;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(
+    SCRATCH, 0, 0, w, h,
+    Math.round(dx - ox * s), Math.round(dy - oy * s),
+    Math.round(w * s), Math.round(h * s),
+  );
+  ctx.imageSmoothingEnabled = was;
+  return out;
+}
+
+/* 스프라이트가 원점 둘레로 차지하는 자리. 넉넉히 잡는다 — 머리 장식·우는 눈물·
+ * 든 상자까지 들어가야 하고, 잘리면 그 프레임만 뭉텅 사라진다. */
+const CH_BOX = { w: 56, h: 72, ox: 28, oy: 64 };
+const DESK_BOX = { w: 100, h: 48, ox: 50, oy: 44 };
+
+export function character(ctx, cx, cy, av, opts = {}) {
+  const s = opts.scale ?? 1;
+  if (s === 1) return drawCharacter(ctx, cx, cy, av, opts);
+  const { w, h, ox, oy } = CH_BOX;
+  const headY = blitScaled(ctx, w, h, ox, oy, cx, cy, s,
+    (c, x, y) => drawCharacter(c, x, y, av, opts));
+  // 말풍선이 머리 위에 앉으려면 확대된 좌표로 돌려줘야 한다.
+  return typeof headY === 'number' ? cy + (headY - oy) * s : headY;
+}
+
+export function desk(ctx, cx, cy, opts = {}) {
+  const s = opts.scale ?? 1;
+  if (s === 1) return drawDesk(ctx, cx, cy, opts);
+  const { w, h, ox, oy } = DESK_BOX;
+  return blitScaled(ctx, w, h, ox, oy, cx, cy, s, (c, x, y) => drawDesk(c, x, y, opts));
+}
+
+export function emptyDesk(ctx, cx, cy, opts = {}) {
+  const s = opts.scale ?? 1;
+  if (s === 1) return drawEmptyDesk(ctx, cx, cy, opts);
+  const { w, h, ox, oy } = DESK_BOX;
+  return blitScaled(ctx, w, h, ox, oy, cx, cy, s, (c, x, y) => drawEmptyDesk(c, x, y, opts));
 }
