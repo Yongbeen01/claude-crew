@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { DATA_DIR, config } from './config.js';
+import { DATA_DIR, ROOT, config } from './config.js';
 import { bus, logActivity } from './bus.js';
 
 /**
@@ -29,6 +29,15 @@ const MODULES_DIR = path.join(TOOLBOX_DIR, 'node_modules');
 const GROUPS = {
   docs: ['pptxgenjs', 'xlsx', 'exceljs'],
   video: ['youtube-dl-exec', 'ffmpeg-static'],
+  // 말을 받아 적는 것. onnxruntime 이 세 플랫폼 바이너리를 다 들고 와서 400MB
+  // 가까이 되므로 더더욱 부를 때만 받는다. 대신 이 컴퓨터 안에서만 돌아간다 —
+  // API 키를 쓰지 않는다는 이 앱의 규칙을 STT 라고 깨지 않는다.
+  stt: ['@huggingface/transformers'],
+};
+
+/** 그룹이 딸려 보내는, 사람이 그냥 실행하면 되는 스크립트. */
+const GROUP_SCRIPTS = {
+  stt: ['transcribe.mjs'],
 };
 
 /** Where a group's binaries land, once it is installed. */
@@ -109,9 +118,11 @@ export function ensureGroup(group) {
 
   writePackageJson();
   state = { ...state, installing: true, error: '' };
-  logActivity('toolbox', group === 'video'
-    ? '영상 도구를 받는 중입니다 (처음 한 번만 걸립니다)'
-    : '문서 도구를 준비합니다 (처음 한 번만 걸립니다)');
+  logActivity('toolbox', {
+    video: '영상 도구를 받는 중입니다 (처음 한 번만 걸립니다)',
+    stt: '말을 받아 적는 도구를 받는 중입니다 — 400MB쯤이라 처음 한 번은 몇 분 걸립니다',
+    docs: '문서 도구를 준비합니다 (처음 한 번만 걸립니다)',
+  }[group] ?? '도구를 준비합니다');
   publish();
 
   const job = npmInstall(GROUPS[group]).then((err) => {
@@ -124,9 +135,11 @@ export function ensureGroup(group) {
     logActivity(
       ok ? 'toolbox' : 'error',
       ok
-        ? (group === 'video'
-          ? '영상 도구 준비 완료 — 영상 파일과 링크를 열어 볼 수 있습니다'
-          : '문서 도구 준비 완료 — PPT·엑셀을 바로 만들 수 있습니다')
+        ? ({
+          video: '영상 도구 준비 완료 — 영상 파일과 링크를 열어 볼 수 있습니다',
+          stt: '받아쓰기 도구 준비 완료 — 영상 속 말을 들을 수 있습니다',
+          docs: '문서 도구 준비 완료 — PPT·엑셀을 바로 만들 수 있습니다',
+        }[group] ?? '도구 준비 완료')
         : `도구를 못 받았습니다 (${state.error.slice(0, 60)}) — 사람들이 필요할 때 직접 받습니다`,
     );
     publish();
@@ -153,6 +166,31 @@ export function ensureToolbox() {
  * The link is to the directory, not a copy, so a group installed *after* this
  * person sat down shows up in their folder without relinking.
  */
+/**
+ * 이 사람이 쓰는 그룹의 스크립트를 작업 폴더에 놓는다.
+ *
+ * 받아쓰기는 정답이 하나뿐인 일이라 세션이 매번 whisper 호출 코드를 새로 짤
+ * 이유가 없다 — 그러면 dtype·청크 길이·타임스탬프 옵션을 하나씩 틀린다.
+ * cwd 에 두므로 스킬이 `node transcribe.mjs <파일>` 한 줄로 부를 수 있다.
+ *
+ * 매번 덮어쓴다: 앱이 업데이트되면 새 스크립트가 들어가야 한다.
+ */
+export function equipTools(workdir, groups = []) {
+  const placed = [];
+  for (const group of groups) {
+    for (const name of GROUP_SCRIPTS[group] ?? []) {
+      const from = path.join(ROOT, 'scripts', 'tools', name);
+      if (!fs.existsSync(from)) continue;
+      try {
+        fs.mkdirSync(workdir, { recursive: true });
+        fs.copyFileSync(from, path.join(workdir, name));
+        placed.push(name);
+      } catch { /* 없어도 세션은 돈다 — 스킬이 그때 사실대로 말한다 */ }
+    }
+  }
+  return placed;
+}
+
 export function linkInto(workdir) {
   if (!fs.existsSync(MODULES_DIR)) return false;
   const target = path.join(workdir, 'node_modules');

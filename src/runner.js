@@ -4,7 +4,7 @@ import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import path from 'node:path';
 import { config, SESSIONS_DIR } from './config.js';
-import { linkInto } from './toolbox.js';
+import { equipTools, linkInto } from './toolbox.js';
 
 const isWin = process.platform === 'win32';
 
@@ -59,6 +59,8 @@ export function childEnv() {
   delete env.ANTHROPIC_AUTH_TOKEN;
   delete env.CLAUDE_CODE_OAUTH_TOKEN;
   delete env.CLAUDE_CONFIG_DIR;
+  // 받아쓰기 스크립트가 어떤 모델을 쓸지. 사람이 고르는 게 아니라 설정에서 온다.
+  env.CREW_STT_MODEL = config.sttModel;
   return env;
 }
 
@@ -192,6 +194,8 @@ export class Runner extends EventEmitter {
     // Give this person the shared document packages before it starts, so making
     // a .pptx or .xlsx doesn't begin with an npm install.
     linkInto(this.workdir);
+    // 이 유형이 쓰는 도구 스크립트 (받아쓰기 등)를 손 닿는 곳에 둔다.
+    equipTools(this.workdir, this.persona?.toolbox ?? []);
     this._spawn(this.buildArgs(), { viaShell: false });
     this.emit('change');
     return this;

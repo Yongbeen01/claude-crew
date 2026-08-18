@@ -47,6 +47,16 @@ const DEFAULTS = {
   models: ['opus', 'sonnet', 'haiku'],
   efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
 
+  /**
+   * 영상 속 말을 받아 적는 모델. 이 컴퓨터 안에서 돈다 — 앱이 API 키를 쓰지
+   * 않는다는 규칙은 받아쓰기에도 그대로다.
+   *
+   * small  240MB · 한국어가 사실상 정확하고 30초 소리에 20초쯤 (기본)
+   * base    76MB · 가볍지만 한국어에서 낱말을 흘린다 ("세 단계" → "새 단계")
+   * large-v3-turbo  1.1GB · 가장 정확하고 두 배 느리다
+   */
+  sttModel: 'onnx-community/whisper-small',
+
   /** `claude` binary. Only ever run as a child process; never handed credentials. */
   claudeBin: process.env.CLAUDE_BIN || 'claude',
 
