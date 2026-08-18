@@ -83,6 +83,15 @@ export async function applyUpdate() {
   if (dirty) {
     return { ok: false, error: '앱 폴더에 직접 수정한 파일이 있어 덮어쓰지 않았습니다.' };
   }
+  // Fetch first, always.
+  //
+  // The merge below is against the *local* origin/<branch> ref, which only moves
+  // when something fetches. Relying on the poll having done it means an apply
+  // that arrives first merges a stale ref, changes nothing, and still reports
+  // success — which is exactly what happened, and it looked like a deploy.
+  const fetched = await run('git', ['fetch', 'origin', BRANCH, '--quiet']);
+  if (!fetched.ok) return { ok: false, error: fetched.err.slice(0, 200) };
+
   const pulled = await run('git', ['merge', '--ff-only', `origin/${BRANCH}`]);
   if (!pulled.ok) return { ok: false, error: pulled.err.slice(0, 200) };
 
