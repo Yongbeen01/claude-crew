@@ -1,5 +1,5 @@
-import { execFile } from 'node:child_process';
 import { bus, logActivity } from './bus.js';
+import { notify } from './toast.js';
 import { paths, readJson, writeJson } from './store.js';
 
 /**
@@ -112,28 +112,22 @@ function fire(mark) {
   // The person says it, not the app: the message lands in their own voice and
   // in the conversation the user is already reading.
   poke(t.personId, text);
-  notifyOs(mark === 0 ? `${t.taskName} 시간이 다 됐습니다` : `${t.taskName} ${mark}분 남았습니다`);
+  // 화면 밖에서도 닿아야 하는 말이다. 시간이 다 된 것은 긴급으로 띄운다 —
+  // 사용자가 직접 치울 때까지 화면에 남고 알람 소리가 반복된다. 남은 시간을
+  // 알리는 쪽은 그럴 일이 아니라 보통 알림이다.
+  notify({
+    title: mark === 0 ? '토끼 · 시간이 다 됐어요' : '토끼',
+    body: mark === 0
+      ? `"${t.taskName}" 시간이 다 됐습니다`
+      : `"${t.taskName}" ${mark}분 남았습니다`,
+    urgent: mark === 0,
+  });
 
   if (mark === 0) {
     clearHandles();
     state.timer = null;
     persist();
   }
-}
-
-/** Windows toast, so a mark still lands when no browser tab is open. */
-function notifyOs(message) {
-  if (process.platform !== 'win32') return;
-  const safe = String(message).replace(/'/g, "''");
-  const script = `
-[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType=WindowsRuntime] > $null
-$t = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)
-$n = $t.GetElementsByTagName('text')
-$n.Item(0).AppendChild($t.CreateTextNode('claude-crew')) > $null
-$n.Item(1).AppendChild($t.CreateTextNode('${safe}')) > $null
-[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('claude-crew').Show([Windows.UI.Notifications.ToastNotification]::new($t))`;
-  execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script],
-    { timeout: 8000, windowsHide: true }, () => { /* best effort */ });
 }
 
 export function shutdown() {

@@ -1,0 +1,53 @@
+import { execFile } from 'node:child_process';
+import path from 'node:path';
+import { ROOT } from './config.js';
+
+/**
+ * Windows 알림.
+ *
+ * 조용한 배너와 긴급 알림은 다른 물건이다. 기본 토스트는 5초쯤 떠 있다가 알림
+ * 센터로 들어가 버리는데, "시간 다 됐다" 는 그렇게 지나가면 안 되는 종류의
+ * 말이다. 그래서 급한 것은 `scenario="reminder"` 로 띄운다 — 사용자가 직접
+ * 치울 때까지 화면에 남고 알람 소리가 반복된다. 리마인더는 버튼이 하나 있어야
+ * 그 성격이 유지되므로 "확인" 을 단다.
+ *
+ * 못 하는 것 하나: 집중 지원(방해 금지)을 뚫는 `scenario="alarm"` 은 앱을
+ * 알람 앱으로 등록해야 쓸 수 있다. 여기서는 등록하지 않으므로, 방해 금지가
+ * 켜져 있으면 알림 센터로 들어간다.
+ *
+ * 문구는 명령줄이 아니라 환경변수로 넘긴다. 할 일 이름에는 따옴표도 한글도
+ * 들어오는데, 그걸 스크립트 문자열에 끼워 넣으면 따옴표 하나로 스크립트가
+ * 깨지거나 임의의 명령이 되어 버린다.
+ */
+
+const HOST = path.join(ROOT, 'scripts', 'toast.ps1');
+
+/**
+ * @param {{title?: string, body: string, urgent?: boolean}} opts
+ * @returns {Promise<{ok: boolean, error?: string}>}
+ */
+export function notify({ title = 'claude-crew', body, urgent = false } = {}) {
+  if (process.platform !== 'win32' || !body) return Promise.resolve({ ok: false });
+  return new Promise((resolve) => {
+    execFile(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', HOST.replace(/\\/g, '/')],
+      {
+        timeout: 10_000,
+        windowsHide: true,
+        env: {
+          ...process.env,
+          CREW_TOAST_TITLE: String(title),
+          CREW_TOAST_BODY: String(body),
+          CREW_TOAST_URGENT: urgent ? '1' : '0',
+          // 버튼 글자도 여기로 — 스크립트 파일은 ASCII 로 유지해야 한다
+          CREW_TOAST_OK: '확인',
+        },
+      },
+      (err, stdout) => {
+        const out = String(stdout ?? '').trim();
+        resolve(err ? { ok: false, error: err.message } : { ok: out.startsWith('ok'), error: out });
+      },
+    );
+  });
+}
