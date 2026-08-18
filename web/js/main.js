@@ -582,11 +582,38 @@ el.composer.addEventListener('submit', async (e) => {
   w.phase = 'thinking';
   w.startedAt = Date.now();
   renderChat();
-  const files = await uploadPending(person.id);
-  await api(`/api/crew/${person.id}/send`, { method: 'POST', body: { text, files } });
-  el.send.disabled = false;
-  el.prompt.focus();
+
+  // 보내기가 실패하면 반드시 여기서 잡아야 한다. 위에서 이미 "생각 중" 을
+  // 그려 놨기 때문에, 예외가 새어나가면 화면은 영원히 생각만 하고 사람은
+  // 답을 기다린다 — 새로고침해야 사라지는데 그러면 쓴 글도 같이 사라진다.
+  try {
+    const files = await uploadPending(person.id);
+    const r = await api(`/api/crew/${person.id}/send`, { method: 'POST', body: { text, files } });
+    if (!r.ok) throw new Error(r.error ?? '보내지 못했습니다');
+  } catch (err) {
+    store.work.delete(person.id);
+    // fetch 가 못 붙으면 "Failed to fetch" 를 던진다. 이 앱을 쓰는 사람이
+    // 읽어야 할 말은 그게 아니다.
+    const why = String(err?.message ?? err);
+    const human = /failed to fetch|networkerror|load failed/i.test(why)
+      ? '앱과 연결이 끊겼습니다. 잠시 뒤 다시 보내 보세요.'
+      : why;
+    pushLocal(person.id, 'error', `보내지 못했습니다 — ${human}`);
+    // 쓴 글은 돌려준다. 다시 치게 만들 이유가 없다.
+    if (!el.prompt.value) el.prompt.value = text;
+    renderChat();
+  } finally {
+    el.send.disabled = false;
+    el.prompt.focus();
+  }
 });
+
+/** 서버에서 온 게 아니라 이 화면에서만 남기는 줄 (실패 안내 등). */
+function pushLocal(personId, role, text) {
+  const msgs = store.chats.get(personId) ?? [];
+  msgs.push({ role, text, at: Date.now(), settled: false });
+  store.chats.set(personId, msgs);
+}
 
 el.prompt.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) {
@@ -859,11 +886,47 @@ function hash(str) {
 // path; the person reads them with its own tools.
 let pending = [];
 
-el.files.addEventListener('change', () => {
-  pending = [...el.files.files];
-  el.files.value = '';
+/**
+ * 한 번에 보낼 수 있는 크기.
+ *
+ * base64 는 원본보다 3분의 1 커지고 서버는 64MB 에서 자르므로, 그 아래에서
+ * 끊는다. 넘으면 조용히 실패하는 대신 바로 말해 준다 — 예전에는 여기서 터진
+ * 예외가 그대로 새어나가 "생각 중" 에 갇혔다.
+ */
+const MAX_UPLOAD = 45 * 1024 * 1024;
+
+/** 버튼으로 고르든 끌어다 놓든 여기로 온다. */
+function addFiles(list) {
+  const incoming = [...list].filter((f) => f && f.size !== undefined);
+  if (!incoming.length) return;
+  // 같은 파일을 두 번 놓아도 한 번만
+  const key = (f) => `${f.name}:${f.size}:${f.lastModified}`;
+  const known = new Set(pending.map(key));
+  const added = incoming.filter((f) => !known.has(key(f)));
+  const total = [...pending, ...added].reduce((n, f) => n + f.size, 0);
+  if (total > MAX_UPLOAD) {
+    attachNote(`파일이 너무 큽니다 — 한 번에 ${Math.round(MAX_UPLOAD / 1024 / 1024)}MB 까지 보낼 수 있습니다.`);
+    return;
+  }
+  pending.push(...added);
   renderAttachments();
+}
+
+el.files.addEventListener('change', () => {
+  addFiles(el.files.files);
+  el.files.value = '';
 });
+
+/** 첨부 줄에 잠깐 띄우는 한 마디. 사라지는 안내라 대화에는 남기지 않는다. */
+let noteTimer = null;
+function attachNote(text) {
+  const note = document.createElement('span');
+  note.className = 'chip warn';
+  note.textContent = text;
+  el.attachments.appendChild(note);
+  clearTimeout(noteTimer);
+  noteTimer = setTimeout(() => { note.remove(); }, 6000);
+}
 
 function renderAttachments() {
   el.attachments.innerHTML = '';
@@ -879,21 +942,102 @@ function renderAttachments() {
 }
 
 /**
+ * 파일 하나를 base64 로.
+ *
+ * `String.fromCharCode(...bytes)` 로 하면 안 된다. 바이트 하나가 인자 하나가
+ * 되어서 100KB 만 넘어도 스택이 터진다 (측정: 100KB 통과, 128KB RangeError).
+ * 엑셀 한 장이 그 선을 훌쩍 넘으므로 첨부는 사실상 늘 실패했다. FileReader 는
+ * 같은 일을 브라우저 안에서 하고 크기 제한이 없다.
+ */
+function toBase64(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(',')[1] ?? '');
+    r.onerror = () => reject(r.error ?? new Error(`${file.name} 을(를) 읽지 못했습니다`));
+    r.readAsDataURL(file);
+  });
+}
+
+/**
  * Base64 over JSON rather than multipart: this is localhost, the files are the
  * kind a person hands a colleague, and it saves hand-rolling a multipart parser
  * in a zero-dependency server.
  */
 async function uploadPending(personId) {
   if (!pending.length) return [];
-  const files = await Promise.all(pending.map(async (f) => ({
-    name: f.name,
-    data: btoa(String.fromCharCode(...new Uint8Array(await f.arrayBuffer()))),
-  })));
+  const files = await Promise.all(pending.map(async (f) => ({ name: f.name, data: await toBase64(f) })));
   const out = await api(`/api/crew/${personId}/files`, { method: 'POST', body: { files } });
+  if (!out.ok) throw new Error(out.error ?? '파일을 옮기지 못했습니다');
   pending = [];
   renderAttachments();
   return out.files ?? [];
 }
+
+// ── 끌어다 놓기 ──────────────────────────────────────────────────────────
+/**
+ * 대화창 어디에 놓아도 첨부됩니다.
+ *
+ * 브라우저는 놓인 파일의 **원래 경로를 알려주지 않습니다**(보안). 그래서 파일을
+ * 그 사람의 작업 폴더로 옮기고, 거기 경로를 메시지에 실어 보냅니다 — 엑셀처럼
+ * 그냥은 안 읽히는 파일도 경로만 있으면 자기 도구로 열 수 있습니다.
+ */
+const dropZone = document.getElementById('chat-panel');
+const dropVeil = document.getElementById('drop-veil');
+
+/** dragleave 는 자식 위로 지나갈 때마다 뜬다 — 세어야 실제로 나간 때를 안다. */
+let dragDepth = 0;
+
+const carriesFiles = (e) => [...(e.dataTransfer?.types ?? [])].includes('Files');
+
+function showVeil(on) {
+  dropVeil.hidden = !on;
+  dropZone.classList.toggle('dropping', on);
+}
+
+dropZone.addEventListener('dragenter', (e) => {
+  if (!carriesFiles(e)) return;
+  e.preventDefault();
+  dragDepth += 1;
+  showVeil(true);
+});
+
+dropZone.addEventListener('dragover', (e) => {
+  if (!carriesFiles(e)) return;
+  // 이걸 막지 않으면 브라우저가 드롭을 거부한다.
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'copy';
+});
+
+dropZone.addEventListener('dragleave', (e) => {
+  if (!carriesFiles(e)) return;
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (!dragDepth) showVeil(false);
+});
+
+dropZone.addEventListener('drop', (e) => {
+  if (!carriesFiles(e)) return;
+  e.preventDefault();
+  dragDepth = 0;
+  showVeil(false);
+  const files = [...(e.dataTransfer?.files ?? [])];
+  if (!files.length) return;
+  if (!selectedPerson()) {
+    attachNote('먼저 파일을 건넬 사람을 고르세요.');
+    return;
+  }
+  addFiles(files);
+  el.prompt.focus();
+});
+
+// 창 밖으로 벗어나면 브라우저가 그 파일로 이동해 버린다 — 쓰던 대화가 통째로
+// 날아가므로, 대화창 밖에 떨어뜨린 것은 그냥 없던 일로 한다.
+window.addEventListener('dragover', (e) => { if (carriesFiles(e)) e.preventDefault(); });
+window.addEventListener('drop', (e) => {
+  if (!carriesFiles(e)) return;
+  e.preventDefault();
+  dragDepth = 0;
+  showVeil(false);
+});
 
 // ── type + skill editor ──────────────────────────────────────────────────
 const editor = { key: null, persona: null, skill: null, dirty: new Map() };

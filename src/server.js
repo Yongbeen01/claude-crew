@@ -2,7 +2,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { ROOT, config } from './config.js';
-import { bus, recentActivity } from './bus.js';
+import { bus, logActivity, recentActivity } from './bus.js';
 import * as crew from './crew.js';
 import { listPersonas, saveSkill, deleteSkill, savePersonaMeta, saveSystemPrompt } from './personas.js';
 import { usageReport } from './usage.js';
@@ -166,12 +166,40 @@ function publicPersona(p) {
   };
 }
 
+/**
+ * 붙인 파일을 어떻게 여는지 한 줄 덧붙인다.
+ *
+ * 파일은 그 사람의 작업 폴더로 복사되고 메시지에는 그 **경로**가 실린다 —
+ * 브라우저는 원본 위치를 알려주지 않으므로(보안), 경로를 만들어 주는 건 앱의
+ * 몫이다.
+ *
+ * 경로만으로 부족한 게 엑셀이다. Read 는 그림·PDF·글자를 읽지, 통합문서는
+ * 압축된 XML 덩어리라 그냥 열면 깨진 글자만 나오고, 세션은 그걸 파일이 망가진
+ * 것으로 오해한다. 읽을 수 있는 패키지가 도구함에 이미 있으니 같이 알려준다.
+ */
+const SHEET_EXT = ['.xlsx', '.xlsm', '.xlsb', '.xls'];
+const OPAQUE_EXT = ['.docx', '.pptx', '.hwp', '.hwpx', '.zip'];
+
+function openingNotes(files) {
+  const ext = (f) => path.extname(f).toLowerCase();
+  const notes = [];
+  if (files.some((f) => SHEET_EXT.includes(ext(f)))) {
+    notes.push('엑셀 파일은 Read 로 열지 마세요 — 깨진 글자만 나옵니다. 작업 폴더에 `xlsx` 가'
+      + " 이미 있으니 `import XLSX from 'xlsx'` 뒤 `XLSX.readFile(경로, { cellDates: true })` 로 읽으세요.");
+  }
+  if (files.some((f) => OPAQUE_EXT.includes(ext(f)))) {
+    notes.push('일부 파일은 그냥 열면 읽히지 않는 형식입니다. 형식에 맞는 방법을 찾아 열고,'
+      + ' 못 열면 못 열었다고 말하세요 — 내용을 짐작해서 채우지 마세요.');
+  }
+  return notes;
+}
+
 function announcePersonas() {
   bus.emit('personas', listPersonas().map(publicPersona));
 }
 
 export function createServer() {
-  const server = http.createServer(async (req, res) => {
+  const handle = async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
     const p = url.pathname;
 
@@ -278,7 +306,8 @@ export function createServer() {
         if (!text && !files.length) return json(res, 400, { ok: false, error: '빈 프롬프트' });
         // Attachments are named in the message, so the person can just read them.
         const message = files.length
-          ? [text, '', '첨부한 파일:', ...files.map((f) => `- ${f}`)].join('\n').trim()
+          ? [text, '', '첨부한 파일:', ...files.map((f) => `- ${f}`), ...openingNotes(files)]
+            .join('\n').trim()
           : text;
         return json(res, 200, { ok: crew.send(id, message) });
       }
@@ -466,6 +495,23 @@ export function createServer() {
 
     if (req.method === 'GET') return serveStatic(res, p);
     return json(res, 404, { error: 'not found' });
+  };
+
+  /**
+   * 무슨 일이 있어도 답은 준다.
+   *
+   * 여기서 던져진 예외는 아무도 받지 않아서 요청이 응답 없이 그대로 매달렸다.
+   * 브라우저 쪽에서는 그게 영원한 "생각 중" 으로 보이고, 새로고침해야 사라진다 —
+   * 첨부가 서버에서 걸렸을 때 실제로 그랬다. 실패는 실패라고 말해야 화면이
+   * 다음 수를 둘 수 있다.
+   */
+  const server = http.createServer((req, res) => {
+    handle(req, res).catch((err) => {
+      const why = String(err?.message ?? err).slice(0, 200);
+      logActivity('error', `요청 실패 — ${req.method} ${String(req.url).slice(0, 60)} — ${why}`);
+      if (res.headersSent) { try { res.end(); } catch { /* 이미 끊긴 연결 */ } }
+      else json(res, 500, { ok: false, error: why });
+    });
   });
 
   // Never cut a held connection: the SSE stream and (later) permission holds
