@@ -18,7 +18,8 @@
 
 <div class="app">
 
-  <aside class="col left">
+  <!-- 왼쪽 = 사무실 그래픽(위) + 상태 섹션들(아래). 오른쪽 = 대화창. -->
+  <main class="col main-area">
     <header class="brand">
       <span class="logo"></span>
       <div>
@@ -28,45 +29,6 @@
       <button type="button" id="open-types" class="ghost tiny" title="유형과 스킬 편집">유형</button>
     </header>
 
-    <section class="panel">
-      <h2>남은 한도</h2>
-      <div id="usage" class="usage"><p class="muted">확인 중…</p></div>
-    </section>
-
-    <section class="panel" id="today-panel" hidden>
-      <h2>오늘</h2>
-      <p class="hint-sm">할 일을 오른쪽 구역에 끌어다 놓으면 그 이름의 창 그룹이 됩니다.</p>
-      <div id="tasks" class="tasks"></div>
-    </section>
-
-    <section class="panel" id="jobs-panel" hidden>
-      <h2>자주 하는 일</h2>
-      <p class="hint-sm">카드를 사람에게 끌어다 놓으면 설명 없이 그 일을 시작합니다.</p>
-      <div id="jobs" class="jobs"></div>
-    </section>
-
-    <section class="panel" id="windows-panel" hidden>
-      <h2>내 창</h2>
-      <p class="hint-sm">한 가지 일에 쓰는 창들을 한 테이블에 모아 두면, 그 일을 시작할 때
-        한 번에 열고 끝나면 한 번에 치울 수 있습니다. 사람을 끌어다 옮기세요.</p>
-      <div id="windows-summary" class="system"></div>
-      <div class="row end">
-        <button type="button" id="group-new" class="ghost tiny">새 그룹</button>
-      </div>
-    </section>
-
-    <section class="panel">
-      <h2>이 컴퓨터</h2>
-      <div id="system" class="system"></div>
-    </section>
-
-    <section class="panel grow">
-      <h2>기록</h2>
-      <ul id="activity" class="activity"></ul>
-    </section>
-  </aside>
-
-  <main class="col center">
     <div class="stage">
       <!-- viewport shrink-wraps the canvas so nameplate coordinates are
            relative to the artwork, not to the centred stage -->
@@ -76,6 +38,41 @@
       </div>
     </div>
     <div class="hint" id="hint" role="status">빈 책상을 누르면 사람을 부릅니다.</div>
+
+    <!-- 상태 섹션들 — 넓고 낮은 자리라 세로로 쌓지 않고 나란히 세운다 -->
+    <div class="deck">
+      <section class="panel">
+        <h2>남은 한도</h2>
+        <div id="usage" class="usage"><p class="muted">확인 중…</p></div>
+      </section>
+
+      <section class="panel" id="today-panel" hidden>
+        <h2>오늘</h2>
+        <p class="hint-sm">할 일을 사무실 구역에 끌어다 놓으면 그 이름의 창 그룹이 됩니다.</p>
+        <div id="tasks" class="tasks"></div>
+      </section>
+
+      <section class="panel" id="jobs-panel" hidden>
+        <h2>자주 하는 일</h2>
+        <p class="hint-sm">눌러서 매뉴얼을 보고, 사람에게 끌어다 놓으면 설명 없이 시작합니다.</p>
+        <div id="jobs" class="jobs"></div>
+      </section>
+
+      <section class="panel" id="windows-panel" hidden>
+        <h2>내 창</h2>
+        <p class="hint-sm">한 가지 일에 쓰는 창들을 한 테이블에 모아 두면, 그 일을 시작할 때
+          한 번에 열고 끝나면 한 번에 치울 수 있습니다. 사람을 끌어다 옮기세요.</p>
+        <div id="windows-summary" class="system"></div>
+        <div class="row end">
+          <button type="button" id="group-new" class="ghost tiny">새 그룹</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>기록</h2>
+        <ul id="activity" class="activity"></ul>
+      </section>
+    </div>
   </main>
 
   <!-- 대화창 너비 조절 손잡이 (좌우 드래그 · 방향키 · 더블클릭으로 되돌리기) -->
@@ -134,6 +131,18 @@
     <div class="sheet-actions">
       <button type="button" id="leave-no" class="ghost">아니요</button>
       <button type="button" id="leave-yes">예</button>
+    </div>
+  </div>
+</div>
+
+<!-- 자주 하는 일의 매뉴얼 — 지금까지 이 일을 하며 쌓인 지침 -->
+<div id="manual" class="modal" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="manual-title">
+    <h3 id="manual-title">매뉴얼</h3>
+    <p class="hint-sm" id="manual-sub"></p>
+    <div id="manual-body" class="manual-body"></div>
+    <div class="sheet-actions">
+      <button type="button" id="manual-close" class="ghost">닫기</button>
     </div>
   </div>
 </div>

@@ -2,7 +2,6 @@ import { execFile } from 'node:child_process';
 import { config, baseUrl, ensureDirs, DATA_DIR } from './config.js';
 import { createServer } from './server.js';
 import { seedPersonas, listPersonas } from './personas.js';
-import { startSystemPolling } from './system.js';
 import { startUsagePolling } from './usage.js';
 import { shutdownAll, poke, all as allCrew, setSummary } from './crew.js';
 import { refreshSummaries } from './summarize.js';
@@ -42,7 +41,6 @@ server.listen(config.port, config.host, () => {
   // voice, rather than as a system banner.
   timers.bindPoke(poke);
   timers.load();
-  startSystemPolling();
   startUsagePolling();
   // Nameplate captions. Cheap, throttled, and skipped for anyone already
   // showing a job name.

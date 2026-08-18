@@ -5,7 +5,6 @@ import { ROOT, config } from './config.js';
 import { bus, recentActivity } from './bus.js';
 import * as crew from './crew.js';
 import { listPersonas, saveSkill, deleteSkill, savePersonaMeta, saveSystemPrompt } from './personas.js';
-import { systemStats } from './system.js';
 import { usageReport } from './usage.js';
 import * as jobs from './jobs.js';
 import * as timers from './timers.js';
@@ -47,7 +46,6 @@ bus.on('crew', (list) => broadcast('crew', list));
 bus.on('delta', (d) => broadcast('delta', d));
 bus.on('message', (m) => broadcast('message', m));
 bus.on('activity', (e) => broadcast('activity', e));
-bus.on('system', (s) => broadcast('system', s));
 bus.on('usage', (u) => broadcast('usage', u));
 bus.on('personas', (p) => broadcast('personas', p));
 bus.on('jobs', (j) => broadcast('jobs', j));
@@ -124,7 +122,6 @@ function fullState() {
     desktop: desktopState(),
     groups: groups.listGroups(),
     activity: recentActivity(),
-    system: systemStats(),
     usage: usageReport(),
     meta: {
       now: Date.now(),

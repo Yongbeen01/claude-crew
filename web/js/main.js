@@ -35,6 +35,12 @@ const store = {
    * {phase, startedAt, tools:[], notes:[], toolsOpen}
    */
   work: new Map(),
+  /**
+   * 내가 안 보고 있는 사이에 일을 끝낸 사람들. 순수하게 화면 쪽 개념이라
+   * 서버는 모른다 — 서버가 아는 건 턴이 끝났다는 사실뿐이고, 그걸 읽었는지
+   * 아닌지는 이 창만 안다.
+   */
+  done: new Set(),
   selectedId: null,
 };
 window.__store = store; // handy for the Playwright checks
@@ -54,7 +60,6 @@ const el = {
   approvalsPanel: document.getElementById('approvals-panel'),
   activity: document.getElementById('activity'),
   usage: document.getElementById('usage'),
-  system: document.getElementById('system'),
   version: document.getElementById('version'),
   hint: document.getElementById('hint'),
   stage: document.querySelector('.stage'),
@@ -91,6 +96,11 @@ const el = {
   leaveWho: document.getElementById('leave-who'),
   leaveYes: document.getElementById('leave-yes'),
   leaveNo: document.getElementById('leave-no'),
+  manual: document.getElementById('manual'),
+  manualTitle: document.getElementById('manual-title'),
+  manualSub: document.getElementById('manual-sub'),
+  manualBody: document.getElementById('manual-body'),
+  manualClose: document.getElementById('manual-close'),
 };
 
 // ── chat width ───────────────────────────────────────────────────────────
@@ -258,7 +268,6 @@ function connect() {
   es.addEventListener('jobs', (e) => { store.jobs = JSON.parse(e.data); renderJobs(); });
   es.addEventListener('tasks', (e) => { store.tasks = JSON.parse(e.data); renderTasks(); });
   es.addEventListener('personas', (e) => { store.personas = JSON.parse(e.data); });
-  es.addEventListener('system', (e) => { store.system = JSON.parse(e.data); renderSystem(); });
   es.addEventListener('usage', (e) => { store.usage = JSON.parse(e.data); renderUsage(); });
 
   es.addEventListener('activity', (e) => {
@@ -304,6 +313,7 @@ function connect() {
     const answer = w?.notes.at(-1) ?? null;
     store.work.delete(personId);
     store.streaming.delete(personId);
+    if (personId !== store.selectedId) { store.done.add(personId); office.setState(store); }
     if (answer) {
       const list = store.chats.get(personId) ?? [];
       list.push({ role: 'assistant', text: answer.text, at: answer.at, settled: true });
@@ -335,6 +345,7 @@ function connect() {
 // ── selection + chat ─────────────────────────────────────────────────────
 async function select(id) {
   store.selectedId = id;
+  store.done.delete(id); // 열어봤으면 더 알릴 게 없다
   office.selectedId = id;
   if (!store.chats.has(id)) {
     const { entries } = await api(`/api/crew/${id}/transcript`);
@@ -380,7 +391,11 @@ function renderChat() {
     return;
   }
 
-  el.chatTitle.textContent = `${person.name} · ${person.personaLabel}`;
+  // The name IS the type now, so saying both would read "표고버섯 · 표고버섯".
+  // The second half only earns its place when it adds something.
+  el.chatTitle.textContent = person.name.startsWith(person.personaLabel)
+    ? person.name
+    : `${person.name} · ${person.personaLabel}`;
   el.composer.hidden = false;
   el.watch.checked = !!person.watch;
   el.trust.checked = !!person.trusted;
@@ -996,6 +1011,55 @@ function renderTasks() {
   }
 }
 
+/**
+ * The manual for a piece of work.
+ *
+ * This is not documentation anybody wrote — it is what the people who have done
+ * this job before left behind (`remember()` in the office MCP), plus the last
+ * few runs. It is the thing the next person reads instead of being told again,
+ * so the user should be able to read it too, and correct their own mental model
+ * of what the office has learned.
+ */
+async function openManual(jobName, origin) {
+  el.manualTitle.textContent = jobName;
+  el.manualSub.textContent = '불러오는 중…';
+  el.manualBody.innerHTML = '';
+  openSheet(el.manual, origin);
+
+  const job = await api(`/api/jobs/${encodeURIComponent(jobName)}`);
+  if (!job || job.error) {
+    el.manualSub.textContent = '';
+    el.manualBody.innerHTML = '<p class="muted">아직 남은 기록이 없습니다.</p>';
+    return;
+  }
+
+  const bits = [`${job.runCount ?? 0}회`];
+  if (job.avgMinutes) bits.push(`보통 ${job.avgMinutes}분`);
+  if (job.personaKey) bits.push(job.personaKey);
+  el.manualSub.textContent = bits.join(' · ');
+
+  el.manualBody.innerHTML = '';
+  const section = (title, body, empty) => {
+    const h = document.createElement('h4');
+    h.textContent = title;
+    el.manualBody.appendChild(h);
+    if (body?.trim()) el.manualBody.appendChild(renderMarkdown(body));
+    else {
+      const p = document.createElement('p');
+      p.className = 'muted';
+      p.textContent = empty;
+      el.manualBody.appendChild(p);
+    }
+  };
+
+  section('쌓인 지침', job.instructions, '아직 없습니다 — 이 일을 몇 번 더 하면 채워집니다.');
+  const runs = (job.runs ?? []).map((r) => r.body ?? r.summary ?? '').filter(Boolean);
+  if (runs.length) section('최근 실행', runs.join('\n\n---\n\n'), '');
+}
+
+el.manualClose.addEventListener('click', () => closeSheet(el.manual));
+el.manual.addEventListener('click', (e) => { if (e.target === el.manual) closeSheet(el.manual); });
+
 function renderJobs() {
   // A job only becomes a card once it has been done at least once; a one-off
   // isn't a habit worth offering.
@@ -1011,7 +1075,7 @@ function renderJobs() {
     card.querySelector('small').textContent = sub;
     card.addEventListener('pointerdown', (e) => startCardDrag(card, {
       kind: 'job', name: j.name, sub,
-    }, e));
+    }, e, () => openManual(j.name, card)));
     el.jobs.appendChild(card);
   }
 }
@@ -1032,7 +1096,7 @@ function renderJobs() {
  *
  * @param {{kind:'job'|'task', name:string, sub:string}} item
  */
-function startCardDrag(card, item, down) {
+function startCardDrag(card, item, down, onTap) {
   if (down.button !== 0) return;
   const origin = card.getBoundingClientRect();
   const grab = { x: down.clientX - origin.left, y: down.clientY - origin.top };
@@ -1105,7 +1169,7 @@ function startCardDrag(card, item, down) {
     card.removeEventListener('pointercancel', onUp);
     el.stage.classList.remove('drop-target');
     setHover(null);
-    if (!ghost) return; // a tap, not a throw
+    if (!ghost) { onTap?.(); return; } // a tap, not a throw
 
     const v = track.get();
     // Where the card would come to rest if you let it slide — a flick toward
@@ -1184,16 +1248,6 @@ function startCardDrag(card, item, down) {
   card.addEventListener('pointercancel', onUp);
 }
 
-function renderSystem() {
-  const s = store.system;
-  if (!s) return;
-  const gb = (n) => `${(n / 1024 ** 3).toFixed(1)}GB`;
-  el.system.innerHTML = `
-    <div class="row"><span>CPU</span><span>${s.cpuPercent}%</span></div>
-    <div class="row"><span>메모리</span><span>${s.memPercent}% · ${gb(s.memTotal - s.memFree)} / ${gb(s.memTotal)}</span></div>
-    <div class="row"><span>자리</span><span>${store.crew.length} / ${store.meta.maxSeats ?? 4}</span></div>`;
-}
-
 function renderActivity() {
   const list = store.activity.slice(-60).reverse();
   el.activity.innerHTML = '';
@@ -1238,7 +1292,6 @@ function renderAll() {
   renderUpdate();
   renderCrew();
   renderUsage();
-  renderSystem();
   renderActivity();
   renderApprovals();
   renderTasks();

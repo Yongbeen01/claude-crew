@@ -21,12 +21,6 @@ import { handover } from './handover.js';
  */
 
 /** Seat + name survive a restart so the same person keeps their desk. */
-const NAMES = [
-  '감자', '고구마', '단호박', '완두콩', '옥수수', '가지', '당근', '무말랭이',
-  '두부', '유부', '메추리알', '표고', '팽이', '느타리', '연근', '우엉',
-  '김밥', '떡국', '수제비', '만두', '전복', '홍합', '멸치', '북어',
-];
-
 /** @type {Map<string, Person>} */
 const people = new Map();
 
@@ -111,11 +105,23 @@ function nextSeat() {
   return -1;
 }
 
-function nextName() {
+/**
+ * A person is called what they are.
+ *
+ * They used to get a random food name, which was charming and useless: you had
+ * to remember that 팽이 was the one who does spreadsheets. The type IS the
+ * useful name, so that is the name. A second one of the same type is numbered
+ * rather than renamed, because "표고버섯 2" still tells you what it does.
+ */
+function nextName(personaKey) {
+  const label = loadPersona(personaKey)?.label ?? personaKey;
   const used = new Set([...people.values()].map((p) => p.name));
-  const free = NAMES.filter((n) => !used.has(n));
-  const pool = free.length ? free : NAMES;
-  return pool[Math.floor(Math.random() * pool.length)];
+  if (!used.has(label)) return label;
+  for (let n = 2; n < 99; n += 1) {
+    const candidate = `${label} ${n}`;
+    if (!used.has(candidate)) return candidate;
+  }
+  return label;
 }
 
 function persist() {
@@ -217,7 +223,7 @@ export function hire(personaKey, opts = {}) {
   const person = new Person({
     id: randomUUID(),
     personaKey,
-    name: nextName(),
+    name: nextName(personaKey),
     seat,
     watch: opts.watch,
   });

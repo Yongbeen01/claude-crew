@@ -139,11 +139,15 @@ body:has(.update-bar:not([hidden])) .app { height: calc(100% - 40px); }
 .update-bar[hidden] { display: none; }
 .update-bar span { flex: 1; }
 
+/* 화면은 크게 둘이다: 왼쪽 = 사무실 + 상태, 오른쪽 = 대화.
+ * 대화창 너비만 손잡이로 조절하고(--right-w), 왼쪽은 남는 자리를 전부 갖는다. */
 .app {
-  --left-w: 260px;
   --right-w: 340px;
+  /* 사무실 그래픽이 상태 섹션보다 확실히 커야 한다. 아래 띠는 내용에 맞춰
+     자라되 화면의 이만큼을 넘지 않는다. */
+  --deck-h: min(240px, 30vh);
   display: grid;
-  grid-template-columns: var(--left-w) minmax(0, 1fr) 6px var(--right-w);
+  grid-template-columns: minmax(0, 1fr) 6px var(--right-w);
   height: 100%;
   gap: 3px;
   background: var(--wood-deep);
@@ -156,11 +160,41 @@ body:has(.update-bar:not([hidden])) .app { height: calc(100% - 40px); }
   overflow: hidden;
 }
 
-/* 옆 칸은 나무 판 — 판때기들이 그 위에 못 박혀 있는 것처럼 보이게 */
-.left, .right {
+/* 왼쪽: 이름표 줄 · 사무실 · 상태 띠 */
+.main-area {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto var(--deck-h);
+  min-height: 0;
+  background: repeating-linear-gradient(180deg, #6d4728 0 30px, #5c3b20 30px 33px);
+}
+.main-area .brand { padding: 8px 14px; }
+
+/* 상태 섹션들: 좁고 긴 칸이 아니라 넓고 낮은 띠에 놓이므로, 세로로 쌓지 않고
+ * 나란히 세운다. 각 판때기는 그 안에서만 세로로 스크롤한다. */
+.deck {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(232px, 1fr);
+  gap: 10px;
+  padding: 0 12px 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  align-items: stretch;
+  min-height: 0;
+}
+.deck > .panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.deck > .panel > :not(h2) { overflow-y: auto; min-height: 0; }
+.deck > .panel[hidden] { display: none; }
+
+/* 오른쪽 칸은 나무 판 — 판때기들이 그 위에 못 박혀 있는 것처럼 */
+.right {
   padding: 12px; gap: 12px;
   overflow-y: auto;
-  /* 가로로 그은 널판 이음매 — 하드 스톱이라 그라데이션이 아니라 판자다 */
   background:
     repeating-linear-gradient(180deg,
       #6d4728 0 30px, #5c3b20 30px 33px);
@@ -210,7 +244,7 @@ body:has(.update-bar:not([hidden])) .app { height: calc(100% - 40px); }
 }
 
 /* ── stage ─────────────────────────────────────────────────────────────── */
-.center { align-items: center; justify-content: center; position: relative; }
+
 .stage {
   position: relative;
   flex: 1;
@@ -318,6 +352,26 @@ body:has(.update-bar:not([hidden])) .app { height: calc(100% - 40px); }
   font-size: 10px; font-weight: 600; letter-spacing: .025em;
   color: var(--wood);
 }
+/* 다 하고 부르는 중. 이름표 전체가 이미 그 사람의 대화창으로 가는 길이라
+ * 따로 버튼을 두지 않고, 눈에 띄는 깃발 하나만 세운다. */
+.plate .done {
+  display: block;
+  width: fit-content;
+  margin: 3px auto 0;
+  padding: 1px 8px;
+  clip-path: var(--notch-sm);
+  background: var(--leaf);
+  box-shadow: inset 0 0 0 2px var(--wood-dark);
+  color: #11250b;
+  font-size: 11px; font-weight: 800; letter-spacing: .01em;
+  white-space: nowrap;
+  animation: done-wave 900ms steps(2, end) infinite;
+}
+@keyframes done-wave {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-2px); }
+}
+
 .plate[data-state="working"] b { background: var(--leaf); color: #10240a; }
 .plate[data-state="awaiting_approval"] b { background: var(--bad); color: #fff0ec; }
 .plate[data-state="exited"] { opacity: .55; }
@@ -367,6 +421,27 @@ body:has(.update-bar:not([hidden])) .app { height: calc(100% - 40px); }
   text-overflow: ellipsis;
   transition: background var(--calm), color var(--calm), transform var(--press);
 }
+/* 프로그램 이름이 창 이름 위에 한 줄. 무엇을 여는 건지가 먼저 읽혀야 한다. */
+.wplate .app {
+  display: block;
+  width: fit-content;
+  margin: 0 auto 1px;
+  padding: 0 4px;
+  clip-path: var(--notch-sm);
+  background: var(--wood);
+  box-shadow: inset 0 0 0 2px var(--wood-deep);
+  color: var(--paper-hi);
+  font: 700 9px/1.5 var(--font);
+  font-style: normal;
+  letter-spacing: .03em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.wplate .app:empty { display: none; }
+.wplate.active .app { background: var(--accent-dark); }
+
 .wplate:hover { max-width: 230px; z-index: 6; }
 .wplate:hover b { background: var(--paper-hi); color: var(--ink); }
 .wplate:active b { transform: translate(1px, 1px); }
@@ -888,6 +963,44 @@ button.ghost:active { box-shadow: inset 0 0 0 3px var(--wood-dark), inset 0 -3px
   box-shadow: inset 0 0 0 3px var(--wood-dark), inset 0 3px 0 3px #e89383;
 }
 
+/* 매뉴얼 — 이 일을 해 본 사람들이 남긴 것. 길어질 수 있으므로 시트 안에서
+ * 스스로 스크롤하고, 본문은 대화창과 같은 마크다운 서식을 쓴다. */
+.manual-body {
+  max-height: min(52vh, 460px);
+  overflow-y: auto;
+  background: var(--paper-hi);
+  clip-path: var(--notch-sm);
+  box-shadow: inset 0 0 0 3px var(--wood-dark);
+  padding: 12px 14px;
+  font-size: 13px; line-height: 1.6;
+}
+.manual-body h4 {
+  margin: 14px 0 6px;
+  font-size: 11px; font-weight: 800; letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--wood);
+}
+.manual-body h4:first-child { margin-top: 0; }
+.manual-body p { margin: 0 0 .6em; }
+.manual-body ul, .manual-body ol { margin: 0 0 .6em; padding-left: 1.35em; }
+.manual-body li { margin: .16em 0; }
+.manual-body li::marker { color: var(--accent-dark); }
+.manual-body strong { font-weight: 800; color: var(--wood-dark); }
+.manual-body hr { margin: .9em 0; border: 0; border-top: 3px dotted var(--line); }
+.manual-body code {
+  font: .88em/1.5 var(--mono);
+  background: var(--paper-3);
+  box-shadow: inset 0 0 0 2px #d3b276;
+  padding: .05em .35em;
+}
+.manual-body pre {
+  margin: 0 0 .6em; padding: 9px 11px;
+  background: var(--wood-dark); color: var(--paper-2);
+  overflow-x: auto;
+}
+.manual-body pre code { background: none; box-shadow: none; padding: 0; color: var(--paper-2); }
+.manual-body a { color: var(--accent-dark); font-weight: 700; text-decoration: none; border-bottom: 2px solid var(--accent); }
+
 .persona-list { display: grid; gap: 9px; }
 .persona {
   display: grid;
@@ -982,21 +1095,25 @@ button.tiny { padding: 4px 10px; font-size: 11px; }
 
 /* ── laid out for a wide screen ────────────────────────────────────────── */
 @media (min-width: 1500px) {
-  .app { --left-w: 288px; --right-w: 380px; }
+  .app { --right-w: 380px; }
 }
 @media (max-width: 1180px) {
-  .app { --left-w: 208px; --right-w: 288px; }
+  .app { --right-w: 288px; }
+  .deck { grid-auto-columns: minmax(200px, 1fr); }
   .panel { padding: 9px 10px; }
 }
 
 @media (max-height: 860px) {
-  .left, .right { padding: 9px; gap: 9px; }
+  .app { --deck-h: min(200px, 26vh); }
+  .right { padding: 9px; gap: 9px; }
+  .deck { padding: 0 9px 9px; gap: 8px; }
   .panel { padding: 9px 10px; }
   .panel h2 { margin-bottom: 6px; }
   .hint { margin: 6px auto 10px; }
   .hint-sm { margin-bottom: 6px; }
 }
 @media (max-height: 720px) {
+  .app { --deck-h: min(170px, 24vh); }
   .brand .logo, .brand small { display: none; }
   .brand b { font-size: 13px; }
   .update-bar { height: 34px; }
@@ -1005,10 +1122,9 @@ button.tiny { padding: 4px 10px; font-size: 11px; }
 
 @media (max-aspect-ratio: 1/1) {
   .app {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    grid-template-rows: minmax(220px, 1fr) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(260px, 1fr) minmax(0, 1fr);
   }
-  .center { grid-column: 1 / -1; }
   .resizer { display: none; }
 }
 

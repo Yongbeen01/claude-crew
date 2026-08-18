@@ -32,7 +32,9 @@ const RUG_TOP = 22;
 const RUG_H = 56;
 const STAND_Y = 46; // floor point the person stands on
 const DESK_Y = 74; // front edge of the desk
-const CREW_COLS = 2;
+/* Three across, so six seats are two rows rather than three. The stage is wide
+ * and short — height is what the zoom is starved of, never width. */
+const CREW_COLS = 3;
 
 const WALL_TOP = 42;
 const WALL = 4;
@@ -749,7 +751,9 @@ export class Office {
       const name = `${person.name}`;
       if (plate.querySelector('b').textContent !== name) plate.querySelector('b').textContent = name;
 
-      const cap = person.state === 'leaving' ? '짐 싸는 중' : (person.caption || person.personaLabel || '');
+      // Falling back to the type would just repeat the name, which is the type.
+      // An empty caption line is better than an echo.
+      const cap = person.state === 'leaving' ? '짐 싸는 중' : (person.caption || '');
       const capEl = plate.querySelector('.cap');
       if (capEl.textContent !== cap) capEl.textContent = cap;
       capEl.classList.toggle('job', !!person.jobName && person.state !== 'leaving');
@@ -765,6 +769,20 @@ export class Office {
       const chipEl = plate.querySelector('.chips');
       const chipText = chips.join(' · ');
       if (chipEl.textContent !== chipText) chipEl.textContent = chipText;
+
+      // They finished while you were looking somewhere else. The whole plate is
+      // already a link to their conversation, so this is the flag, not a second
+      // button — and it goes the moment you open them.
+      const done = !!this.state.done?.has(person.id) && person.state !== 'leaving';
+      let doneEl = plate.querySelector('.done');
+      if (done && !doneEl) {
+        doneEl = document.createElement('span');
+        doneEl.className = 'done';
+        doneEl.textContent = '다했어요';
+        plate.appendChild(doneEl);
+      } else if (!done && doneEl) {
+        doneEl.remove();
+      }
     }
 
     for (const [id, el] of this.plates) {
@@ -782,7 +800,10 @@ export class Office {
       if (!plate) {
         plate = document.createElement('div');
         plate.className = 'wplate';
-        plate.innerHTML = '<b></b>';
+        // Which program it is, then which window. A title alone ("2026 예산")
+        // does not tell you whether clicking it lands you in Excel or a browser
+        // tab, and that is the thing you are actually looking for.
+        plate.innerHTML = '<i class="app"></i><b></b>';
         plate.title = '';
         plate.addEventListener('click', (e) => {
           e.stopPropagation();
@@ -800,7 +821,10 @@ export class Office {
       plate.classList.toggle('active', !!person.active);
       const b = plate.querySelector('b');
       if (b.textContent !== person.name) b.textContent = person.name;
-      const title = `${person.name} · ${person.app}`;
+      const appEl = plate.querySelector('.app');
+      const app = person.app ?? '';
+      if (appEl.textContent !== app) appEl.textContent = app;
+      const title = `${person.app} — ${person.name}`;
       if (plate.title !== title) plate.title = title;
     };
 

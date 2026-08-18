@@ -30,7 +30,7 @@ const DEFAULTS = {
   host: '127.0.0.1',
 
   /** how many people can sit in the office at once — one Claude session each */
-  maxSeats: 4,
+  maxSeats: 6,
 
   /** default model per spawned person unless the persona overrides it */
   defaultModel: 'sonnet',
