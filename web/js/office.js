@@ -24,7 +24,9 @@ import {
  * partition between them rather than a gap.
  */
 
-const CELL_W = 96;
+/* 가로 간격. 3열이 한 덩어리로 읽히도록 좁게 — 세로(CELL_H)는 이름표가
+ * 아랫줄을 침범하지 않을 만큼 그대로 둔다. */
+const CELL_W = 78;
 const CELL_H = 96;
 /** Where a workstation sits inside its cell — the rug is sized to this, not to
  *  the cell, or a taller cell stretches it into the next row's nameplate. */
@@ -63,7 +65,9 @@ const MAX_SCALE = 5;
 const POD_W = 92;
 const POD_H = 106;
 const POD_COLS_MAX = 4;
-const LOOSE_STEP = 30;
+/* 대기 구역의 사람 간격. 이름표가 창 이름을 달고 있어서 30px 로는 라벨이
+ * 서로를 덮었다 — 글자가 읽히는 폭까지 벌린다. */
+const LOOSE_STEP = 90;
 const LOOSE_ROW_H = 44;
 /**
  * The floor under the windows zone, not its usual size — it grows into whatever
@@ -113,9 +117,38 @@ function hash(str) {
   return h;
 }
 
-const APP_HUES = ['#5b8def', '#5fd39a', '#f0b45a', '#e0705b', '#a77bd8', '#4ec3d9', '#e88fc0'];
-function appColor(app) {
-  return APP_HUES[hash(app ?? '') % APP_HUES.length];
+/**
+ * One colour per program, the same everywhere it appears.
+ *
+ * The point is telling programs apart at a glance in a room holding twenty
+ * windows: every Chrome window carries the same chip, and it is not the chip
+ * Excel carries. Twelve hues rather than seven because seven collide fast once
+ * a real desktop is on screen.
+ */
+const APP_HUES = [
+  '#5b8def', '#5fd39a', '#f0b45a', '#e0705b', '#a77bd8', '#4ec3d9',
+  '#e88fc0', '#8ab44a', '#d9954e', '#6f7fd0', '#4aa88a', '#c86a8f',
+];
+/**
+ * Hashing the name was the obvious way and it was wrong: with seven programs
+ open it handed Chrome and 터미널 the same pink, which is exactly the question
+ * the colour exists to answer. So the colours are *assigned* instead — the
+ * programs on screen are sorted and dealt one hue each, which collides only
+ * past twelve and is stable as long as the same set is open.
+ */
+function assignHues(apps) {
+  const map = new Map();
+  [...new Set(apps.filter(Boolean))].sort().forEach((name, i) => {
+    map.set(name, APP_HUES[i % APP_HUES.length]);
+  });
+  return map;
+}
+
+/** Dark ink on a light chip, light ink on a dark one. */
+function inkOn(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  const lum = (0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
+  return lum > 0.62 ? '#2a1a0e' : '#fffaec';
 }
 
 export class Office {
@@ -181,6 +214,11 @@ export class Office {
 
   get seats() {
     return Math.max(1, this.state.meta?.maxSeats ?? 4);
+  }
+
+  /** 이번 프레임의 앱→색. render() 가 채운다. */
+  _hueFor(app) {
+    return this.appHue?.get(app) ?? APP_HUES[0];
   }
 
   get windowPeople() {
@@ -396,6 +434,8 @@ export class Office {
   render(now = performance.now()) {
     const g = this._layout();
     this.geom = g;
+    // 이번 프레임에 화면에 있는 프로그램들에게 색을 나눠준다.
+    this.appHue = assignHues(this.windowPeople.map((p) => p.app));
     this._resizeToFit(g.w, g.h);
     const ctx = this.bctx;
     const { w, h } = g;
@@ -762,7 +802,7 @@ export class Office {
       bob: asleep ? 2 : Math.sin(t * 1.3) * 0.5,
       blink: asleep || Math.sin(t * 0.9 + av.phase * 10) > 0.985,
       alpha: asleep ? 0.5 : 1,
-      badge: appColor(person.app),
+      badge: this._hueFor(person.app),
       droop: asleep ? 1 : 0,
     });
     if (person.active) {
@@ -794,7 +834,7 @@ export class Office {
     character(ctx, Math.round(d.x), Math.round(d.y + 12), avatarOf(hash(person.key), ''), {
       bob: Math.sin(t * 8) * 1.2,
       step: t * 7,
-      badge: appColor(person.app),
+      badge: this._hueFor(person.app),
     });
   }
 
@@ -906,6 +946,13 @@ export class Office {
       const appEl = plate.querySelector('.app');
       const app = person.app ?? '';
       if (appEl.textContent !== app) appEl.textContent = app;
+      // Same program, same colour — that is the whole point of the chip.
+      const hue = this._hueFor(app);
+      if (appEl.dataset.hue !== hue) {
+        appEl.dataset.hue = hue;
+        appEl.style.background = hue;
+        appEl.style.color = inkOn(hue);
+      }
       const title = `${person.app} — ${person.name}`;
       if (plate.title !== title) plate.title = title;
     };

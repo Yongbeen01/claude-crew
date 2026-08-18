@@ -376,9 +376,17 @@ export function createServer() {
     if (p === '/api/jobs') return json(res, 200, { jobs: jobs.listJobs() });
 
     if (p.startsWith('/api/jobs/')) {
-      const name = decodeURIComponent(p.split('/')[3] ?? '');
+      const [, , , raw, action] = p.split('/');
+      const name = decodeURIComponent(raw ?? '');
       const job = jobs.listJobs().find((j) => j.slug === name || j.name === name);
       if (!job) return json(res, 404, { error: 'unknown job' });
+      // The accumulated instructions are a draft the user gets to correct —
+      // every future session is handed them verbatim.
+      if (action === 'instructions' && req.method === 'POST') {
+        const body = await readBody(req);
+        const saved = jobs.setInstructions(job.name, body.body ?? '');
+        return json(res, saved ? 200 : 400, { ok: !!saved, job: saved });
+      }
       return json(res, 200, jobs.getJob(job.name));
     }
 

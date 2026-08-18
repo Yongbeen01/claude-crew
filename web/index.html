@@ -37,10 +37,18 @@
         <div id="nameplates"></div>
       </div>
     </div>
-    <div class="hint" id="hint" role="status">빈 책상을 누르면 사람을 부릅니다.</div>
+    <div class="hint" id="hint" role="status" hidden></div>
 
-    <!-- 상태 섹션들 — 넓고 낮은 자리라 세로로 쌓지 않고 나란히 세운다 -->
-    <div class="deck">
+    <!-- 상태 띠 높이 조절 손잡이 (위아래 드래그 · 방향키 · 더블클릭으로 되돌리기) -->
+    <div id="deck-resize" class="resizer-h" role="separator" aria-orientation="horizontal"
+         tabindex="0" aria-label="상태 섹션 높이" title="끌어서 높이 조절 · 더블클릭하면 원래대로"></div>
+
+    <!-- 상태 섹션들 — 넓고 낮은 자리라 세로로 쌓지 않고 나란히 세운다.
+         가로로 길어지므로 양 끝으로 데려다 주는 화살표를 띄워 둔다. -->
+    <div class="deck-wrap">
+      <button type="button" id="deck-prev" class="deck-arrow prev" aria-label="맨 앞으로" hidden>◀</button>
+      <button type="button" id="deck-next" class="deck-arrow next" aria-label="맨 끝으로" hidden>▶</button>
+    <div class="deck" id="deck">
       <section class="panel">
         <h2>남은 한도</h2>
         <div id="usage" class="usage"><p class="muted">확인 중…</p></div>
@@ -82,6 +90,7 @@
         <ul id="activity" class="activity"></ul>
       </section>
     </div>
+    </div>
   </main>
 
   <!-- 대화창 너비 조절 손잡이 (좌우 드래그 · 방향키 · 더블클릭으로 되돌리기) -->
@@ -120,7 +129,7 @@
             파일 붙이기
             <input type="file" id="files" multiple hidden>
           </label>
-          <button type="button" id="dismiss" class="ghost tiny">퇴근시키기</button>
+          <button type="button" id="dismiss" class="ghost tiny">끝내고 내보내기</button>
         </div>
       </form>
     </section>
@@ -179,8 +188,12 @@
     <h3 id="manual-title">매뉴얼</h3>
     <p class="hint-sm" id="manual-sub"></p>
     <div id="manual-body" class="manual-body"></div>
+    <textarea id="manual-edit" class="manual-edit" rows="12" spellcheck="false" hidden
+      placeholder="이 일을 할 때 지켜야 하는 것들을 적어 두세요. 다음 사람이 그대로 읽습니다."></textarea>
     <div class="sheet-actions">
+      <button type="button" id="manual-editor" class="ghost tiny">지침 고치기</button>
       <button type="button" id="manual-close" class="ghost">닫기</button>
+      <button type="button" id="manual-save" hidden>저장</button>
     </div>
   </div>
 </div>

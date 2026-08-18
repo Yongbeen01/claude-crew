@@ -138,6 +138,27 @@ export function remember(jobName, instruction) {
 }
 
 /**
+ * Replace a job's standing instructions wholesale.
+ *
+ * `remember()` is how a *session* adds a line it worked out; this is how the
+ * user rewrites the whole thing. They need to be able to: what accumulates
+ * automatically is a rough draft — sometimes wrong, sometimes phrased in a way
+ * that will mislead the next person — and it is handed to every future session
+ * verbatim, so it has to be correctable by hand.
+ */
+export function setInstructions(jobName, body) {
+  const name = String(jobName ?? '').trim();
+  if (!name) return null;
+  const slug = slugify(name);
+  if (!readMeta(slug)) return null;
+  const dir = jobDir(slug);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'instructions.md'), String(body ?? '').trim() + '\n', 'utf8');
+  bus.emit('jobs', listJobs());
+  return getJob(name);
+}
+
+/**
  * The briefing handed to a person when a job card is dropped on them.
  * Kept plain — it is appended to a system prompt, not shown to the user.
  */

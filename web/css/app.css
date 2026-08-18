@@ -142,10 +142,10 @@ body:has(.update-bar:not([hidden])) .app { height: calc(100% - 40px); }
 /* 화면은 크게 둘이다: 왼쪽 = 사무실 + 상태, 오른쪽 = 대화.
  * 대화창 너비만 손잡이로 조절하고(--right-w), 왼쪽은 남는 자리를 전부 갖는다. */
 .app {
-  --right-w: 340px;
+  --right-w: 300px;
   /* 사무실 그래픽이 상태 섹션보다 확실히 커야 한다. 아래 띠는 내용에 맞춰
      자라되 화면의 이만큼을 넘지 않는다. */
-  --deck-h: min(240px, 30vh);
+  --deck-h: min(276px, 34vh);
   display: grid;
   grid-template-columns: minmax(0, 1fr) 6px var(--right-w);
   height: 100%;
@@ -163,25 +163,59 @@ body:has(.update-bar:not([hidden])) .app { height: calc(100% - 40px); }
 /* 왼쪽: 이름표 줄 · 사무실 · 상태 띠 */
 .main-area {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto var(--deck-h);
+  grid-template-rows: auto minmax(0, 1fr) auto 6px var(--deck-h);
   min-height: 0;
   background: repeating-linear-gradient(180deg, #6d4728 0 30px, #5c3b20 30px 33px);
 }
+/* Each child is pinned to its row rather than left to auto-placement.
+ * A `hidden` child is `display: none` and takes NO row, so the moment the hint
+ * was empty everything after it slid up one — the status strip ended up in the
+ * 6px handle row, six pixels tall, with its contents unclickable. */
+.main-area > .brand { grid-row: 1; }
+.main-area > .stage { grid-row: 2; }
+.main-area > .hint { grid-row: 3; }
+.main-area > .resizer-h { grid-row: 4; }
+.main-area > .deck-wrap { grid-row: 5; }
 .main-area .brand { padding: 8px 14px; }
 
 /* 상태 섹션들: 좁고 긴 칸이 아니라 넓고 낮은 띠에 놓이므로, 세로로 쌓지 않고
  * 나란히 세운다. 각 판때기는 그 안에서만 세로로 스크롤한다. */
+.deck-wrap { position: relative; min-height: 0; }
 .deck {
+  --deck-gutter: 44px;
+  height: 100%;
   display: grid;
   grid-auto-flow: column;
   grid-auto-columns: minmax(232px, 1fr);
   gap: 10px;
-  padding: 0 12px 12px;
+  /* 양 끝에 화살표가 앉을 자리를 비워 둔다 — 맨 앞이나 맨 끝까지 밀었을 때
+     판때기가 화살표 밑으로 들어가지 않도록. */
+  padding: 0 var(--deck-gutter) 12px;
   overflow-x: auto;
   overflow-y: hidden;
   align-items: stretch;
   min-height: 0;
+  scroll-behavior: smooth;
 }
+/* 오늘 할 일은 한 줄에 "무엇을 · 몇 분" 두 값이 들어가므로 다른 칸보다 넓다. */
+.deck > #today-panel,
+.deck > #windows-panel { grid-column: span 2; }
+
+/* 양 끝으로 데려다 주는 화살표. 갈 곳이 있을 때만 나타난다. */
+.deck-arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 3;
+  width: 32px;
+  padding: 10px 0;
+  font-size: 13px;
+  line-height: 1;
+}
+.deck-arrow[hidden] { display: none; }
+.deck-arrow.prev { left: 6px; }
+.deck-arrow.next { right: 6px; }
+.deck-arrow:active { transform: translateY(-50%) translate(2px, 2px); }
 .deck > .panel {
   display: flex;
   flex-direction: column;
@@ -654,6 +688,36 @@ body:has(.update-bar:not([hidden])) .app { height: calc(100% - 40px); }
 .resizer.dragging::before { background: var(--accent); box-shadow: 0 -10px 0 var(--accent), 0 10px 0 var(--accent); }
 body.resizing { cursor: col-resize; user-select: none; }
 
+/* 사무실과 상태 띠 사이의 가로 손잡이 — 세로 것과 같은 문법, 방향만 다르다. */
+.resizer-h {
+  position: relative;
+  cursor: row-resize;
+  background: var(--wood);
+  transition: background var(--calm);
+  user-select: none;
+  touch-action: none;
+}
+.resizer-h::before {
+  content: '';
+  position: absolute;
+  left: 50%; top: 0;
+  width: 8px; height: 6px;
+  transform: translateX(-50%);
+  background: var(--paper-3);
+  box-shadow: -14px 0 0 var(--paper-3), 14px 0 0 var(--paper-3);
+  opacity: 0;
+  transition: opacity var(--calm);
+}
+.resizer-h:hover::before,
+.resizer-h:focus-visible::before,
+.resizer-h.dragging::before { opacity: 1; }
+.resizer-h:hover, .resizer-h.dragging { background: #8e6039; }
+.resizer-h.dragging::before {
+  background: var(--accent);
+  box-shadow: -14px 0 0 var(--accent), 14px 0 0 var(--accent);
+}
+body.resizing-v { cursor: row-resize; user-select: none; }
+
 /* ── markdown in the conversation ─────────────────────────────────────────
  * 답변은 글이다 — 여기서만은 여백을 넉넉히 준다. 글자 크기는 말풍선의 13px 기준
  * 상대값이라 대화창을 넓혀도 한 덩어리로 커진다. */
@@ -1040,6 +1104,23 @@ button.danger:hover { background: var(--bad); color: #fff0ec; }
   color: var(--wood);
 }
 .manual-body h4:first-child { margin-top: 0; }
+/* 읽는 자리와 고치는 자리가 같은 크기라, 바꿔도 시트가 튀지 않는다. */
+.manual-edit {
+  min-height: min(52vh, 460px);
+  max-height: min(52vh, 460px);
+  background: var(--paper-hi);
+  border: none;
+  clip-path: var(--notch-sm);
+  box-shadow: inset 0 0 0 3px var(--wood-dark);
+  padding: 12px 14px;
+  color: var(--ink);
+  font: 13px/1.6 var(--mono);
+  resize: none;
+  outline: none;
+  transition: box-shadow var(--calm);
+}
+.manual-edit:focus { box-shadow: inset 0 0 0 3px var(--accent-dark), inset 0 0 0 6px var(--accent); }
+.manual-edit[hidden] { display: none; }
 .manual-body p { margin: 0 0 .6em; }
 .manual-body ul, .manual-body ol { margin: 0 0 .6em; padding-left: 1.35em; }
 .manual-body li { margin: .16em 0; }
@@ -1154,16 +1235,16 @@ button.tiny { padding: 4px 10px; font-size: 11px; }
 
 /* ── laid out for a wide screen ────────────────────────────────────────── */
 @media (min-width: 1500px) {
-  .app { --right-w: 380px; }
+  .app { --right-w: 330px; }
 }
 @media (max-width: 1180px) {
-  .app { --right-w: 288px; }
+  .app { --right-w: 264px; }
   .deck { grid-auto-columns: minmax(200px, 1fr); }
   .panel { padding: 9px 10px; }
 }
 
 @media (max-height: 860px) {
-  .app { --deck-h: min(200px, 26vh); }
+  .app { --deck-h: min(230px, 30vh); }
   .right { padding: 9px; gap: 9px; }
   .deck { padding: 0 9px 9px; gap: 8px; }
   .panel { padding: 9px 10px; }
@@ -1172,7 +1253,7 @@ button.tiny { padding: 4px 10px; font-size: 11px; }
   .hint-sm { margin-bottom: 6px; }
 }
 @media (max-height: 720px) {
-  .app { --deck-h: min(170px, 24vh); }
+  .app { --deck-h: min(195px, 27vh); }
   .brand .logo, .brand small { display: none; }
   .brand b { font-size: 13px; }
   .update-bar { height: 34px; }

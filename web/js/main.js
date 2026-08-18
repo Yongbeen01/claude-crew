@@ -103,6 +103,12 @@ const el = {
   manualSub: document.getElementById('manual-sub'),
   manualBody: document.getElementById('manual-body'),
   manualClose: document.getElementById('manual-close'),
+  manualEdit: document.getElementById('manual-edit'),
+  manualEditor: document.getElementById('manual-editor'),
+  manualSave: document.getElementById('manual-save'),
+  deck: document.getElementById('deck'),
+  deckPrev: document.getElementById('deck-prev'),
+  deckNext: document.getElementById('deck-next'),
   group: document.getElementById('group'),
   groupTitle: document.getElementById('group-title'),
   groupName: document.getElementById('group-name'),
@@ -893,11 +899,16 @@ window.__crewReady = true;
 office.setState(store);
   const seated = store.crew.length;
   const leaving = store.crew.some((p) => p.state === 'leaving');
-  el.hint.textContent = leaving
+  // 늘 떠 있는 사용법 안내는 없앴다 — 한 번 해 보면 아는 것들이고, 화면에서
+  // 방이 가져갈 수 있는 높이를 계속 깎아먹었다. 남긴 것은 지금 당장 막혀서
+  // 알려줄 값어치가 있는 두 가지뿐이다.
+  const note = leaving
     ? '나가는 사람이 이번에 알게 된 것을 정리하는 중입니다.'
-    : seated >= (store.meta.maxSeats ?? 4)
-      ? '자리가 다 찼습니다. 오른쪽 문으로 한 명 내보내면 새로 부를 수 있습니다.'
-      : '빈 책상을 누르면 사람을 부릅니다. 문으로 끌면 내보냅니다.';
+    : seated >= (store.meta.maxSeats ?? 6)
+      ? '자리가 다 찼습니다. 문으로 한 명 내보내면 새로 부를 수 있습니다.'
+      : '';
+  el.hint.textContent = note;
+  el.hint.hidden = !note;
 
   // Someone who has left is gone: their conversation goes with them, or the
   // next person to take that seat would inherit it.
@@ -1033,15 +1044,17 @@ function renderTasks() {
  * of what the office has learned.
  */
 async function openManual(jobName, origin) {
+  manualJob = jobName;
   el.manualTitle.textContent = jobName;
   el.manualSub.textContent = '불러오는 중…';
   el.manualBody.innerHTML = '';
-  openSheet(el.manual, origin);
+  if (origin) { setManualEditing(false); openSheet(el.manual, origin); }
 
   const job = await api(`/api/jobs/${encodeURIComponent(jobName)}`);
   if (!job || job.error) {
     el.manualSub.textContent = '';
     el.manualBody.innerHTML = '<p class="muted">아직 남은 기록이 없습니다.</p>';
+    el.manualEdit.value = '';
     return;
   }
 
@@ -1064,10 +1077,40 @@ async function openManual(jobName, origin) {
     }
   };
 
-  section('쌓인 지침', job.instructions, '아직 없습니다 — 이 일을 몇 번 더 하면 채워집니다.');
+  el.manualEdit.value = (job.instructions ?? '').trim();
+  section('쌓인 지침', job.instructions, '아직 없습니다 — 이 일을 몇 번 더 하면 채워집니다. 직접 적어 둬도 됩니다.');
   const runs = (job.runs ?? []).map((r) => r.body ?? r.summary ?? '').filter(Boolean);
   if (runs.length) section('최근 실행', runs.join('\n\n---\n\n'), '');
 }
+
+/**
+ * Reading the manual, or rewriting it.
+ *
+ * What accumulates here is written by sessions as they go — a rough draft that
+ * is sometimes wrong and is handed to every future person verbatim. So it has
+ * to be correctable by hand, in the same place you read it.
+ */
+let manualJob = null;
+
+function setManualEditing(on) {
+  el.manualBody.hidden = on;
+  el.manualEdit.hidden = !on;
+  el.manualSave.hidden = !on;
+  el.manualEditor.textContent = on ? '읽기로' : '지침 고치기';
+  if (on) el.manualEdit.focus();
+}
+
+el.manualEditor.addEventListener('click', () => setManualEditing(el.manualEdit.hidden));
+
+el.manualSave.addEventListener('click', async () => {
+  if (!manualJob) return;
+  el.manualSave.disabled = true;
+  const r = await api(`/api/jobs/${encodeURIComponent(manualJob)}/instructions`, {
+    method: 'POST', body: { body: el.manualEdit.value },
+  });
+  el.manualSave.disabled = false;
+  if (r?.ok) { await openManual(manualJob); setManualEditing(false); }
+});
 
 el.manualClose.addEventListener('click', () => closeSheet(el.manual));
 el.manual.addEventListener('click', (e) => { if (e.target === el.manual) closeSheet(el.manual); });
@@ -1451,6 +1494,107 @@ function renderAll() {
   renderChat();
 }
 window.__render = renderAll; // handy for the Playwright checks
+
+// ── the status strip's height ────────────────────────────────────────────
+/**
+ * How much of the left side the status panels get, and how much is left for the
+ * room. Same shape as the chat-width handle — including listening on the window
+ * rather than the handle, for the same reason.
+ */
+const DECK_KEY = 'crew.deckHeight';
+const deckResizer = document.getElementById('deck-resize');
+
+function clampDeck(px) {
+  // The room must keep the larger share; below ~120px the panels are unreadable.
+  const max = Math.max(160, Math.round(window.innerHeight * 0.52));
+  return Math.round(Math.max(120, Math.min(max, px)));
+}
+
+function setDeckHeight(px, { save = true } = {}) {
+  const h = clampDeck(px);
+  app.style.setProperty('--deck-h', `${h}px`);
+  deckResizer.setAttribute('aria-valuenow', String(h));
+  if (save) { try { localStorage.setItem(DECK_KEY, String(h)); } catch { /* private mode */ } }
+  return h;
+}
+
+function currentDeckHeight() {
+  return document.querySelector('.deck-wrap').getBoundingClientRect().height;
+}
+
+function clearDeckHeight() {
+  app.style.removeProperty('--deck-h');
+  deckResizer.removeAttribute('aria-valuenow');
+  try { localStorage.removeItem(DECK_KEY); } catch { /* private mode */ }
+}
+
+(function restoreDeckHeight() {
+  let saved = null;
+  try { saved = localStorage.getItem(DECK_KEY); } catch { /* private mode */ }
+  if (saved) setDeckHeight(Number(saved), { save: false });
+})();
+
+deckResizer.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0) return;
+  e.preventDefault();
+  const id = e.pointerId;
+  try { deckResizer.setPointerCapture(id); } catch { /* capture is a nicety */ }
+  deckResizer.classList.add('dragging');
+  document.body.classList.add('resizing-v');
+
+  // Measured from the bottom of the window, which is where this band ends.
+  const move = (ev) => {
+    if (ev.pointerId !== id) return;
+    setDeckHeight(document.documentElement.clientHeight - ev.clientY, { save: false });
+  };
+  const up = (ev) => {
+    if (ev && ev.pointerId !== id) return;
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    window.removeEventListener('pointercancel', up);
+    deckResizer.classList.remove('dragging');
+    document.body.classList.remove('resizing-v');
+    setDeckHeight(currentDeckHeight());
+  };
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+  window.addEventListener('pointercancel', up);
+});
+
+deckResizer.addEventListener('dblclick', clearDeckHeight);
+deckResizer.addEventListener('keydown', (e) => {
+  const step = e.shiftKey ? 48 : 12;
+  if (e.key === 'ArrowUp') setDeckHeight(currentDeckHeight() + step);
+  else if (e.key === 'ArrowDown') setDeckHeight(currentDeckHeight() - step);
+  else if (e.key === 'Home' || e.key === 'Escape') clearDeckHeight();
+  else return;
+  e.preventDefault();
+});
+
+// ── the deck's ends ──────────────────────────────────────────────────────
+/**
+ * The status strip runs wider than the screen, and a horizontal scrollbar in a
+ * 200px-tall band is a poor handle. These take you to either end in one press.
+ *
+ * They only appear when there is somewhere to go, and the strip keeps a gutter
+ * at each end (--deck-gutter) so a panel never comes to rest underneath one.
+ */
+function syncDeckArrows() {
+  const d = el.deck;
+  const over = d.scrollWidth - d.clientWidth;
+  const scrollable = over > 8;
+  el.deckPrev.hidden = !scrollable || d.scrollLeft <= 4;
+  el.deckNext.hidden = !scrollable || d.scrollLeft >= over - 4;
+}
+
+el.deckPrev.addEventListener('click', () => el.deck.scrollTo({ left: 0, behavior: 'smooth' }));
+el.deckNext.addEventListener('click', () => el.deck.scrollTo({ left: el.deck.scrollWidth, behavior: 'smooth' }));
+el.deck.addEventListener('scroll', syncDeckArrows, { passive: true });
+window.addEventListener('resize', syncDeckArrows);
+// Panels appear and disappear as work arrives, so the strip's width is not
+// fixed — watch it rather than checking once.
+new ResizeObserver(syncDeckArrows).observe(el.deck);
+new MutationObserver(syncDeckArrows).observe(el.deck, { childList: true, attributes: true, subtree: true });
 
 // ── loop ─────────────────────────────────────────────────────────────────
 let last = 0;
