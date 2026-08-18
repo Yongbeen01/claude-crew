@@ -186,6 +186,45 @@ export function printer(ctx, cx, cy) {
   px(ctx, cx + 5, cy - 18, 3, 2, '#5fd39a');
 }
 
+/** Two-seat couch, front-on. The lounge corner of the room. */
+export function sofa(ctx, cx, cy, color = '#7b6a9c') {
+  const dark = darken(color, 0.28);
+  const light = lighten(color, 0.14);
+  shadow(ctx, cx, cy, 40, 7);
+  px(ctx, cx - 19, cy - 20, 38, 12, dark);      // backrest
+  px(ctx, cx - 19, cy - 20, 38, 3, light);
+  px(ctx, cx - 21, cy - 16, 5, 14, color);      // arms
+  px(ctx, cx + 16, cy - 16, 5, 14, color);
+  px(ctx, cx - 16, cy - 10, 32, 9, color);      // seat
+  px(ctx, cx - 16, cy - 10, 32, 2, light);
+  px(ctx, cx - 1, cy - 9, 2, 8, dark);          // cushion seam
+  px(ctx, cx - 15, cy - 1, 4, 3, '#3a2c22');    // feet
+  px(ctx, cx + 11, cy - 1, 4, 3, '#3a2c22');
+}
+
+/** Low table — sits in front of the sofa with a mug on it. */
+export function coffeeTable(ctx, cx, cy, color = '#9a7550') {
+  shadow(ctx, cx, cy, 24, 5);
+  px(ctx, cx - 12, cy - 10, 24, 5, color);
+  px(ctx, cx - 12, cy - 10, 24, 2, lighten(color, 0.16));
+  px(ctx, cx - 10, cy - 5, 2, 5, darken(color, 0.3));
+  px(ctx, cx + 8, cy - 5, 2, 5, darken(color, 0.3));
+  px(ctx, cx - 3, cy - 14, 5, 4, '#f2f2ee');    // mug
+  px(ctx, cx + 2, cy - 13, 2, 2, '#f2f2ee');    // handle
+}
+
+/** Filing cabinet — three drawers, the archive of a working room. */
+export function cabinet(ctx, cx, cy, color = '#8a8f9c') {
+  shadow(ctx, cx, cy, 20, 6);
+  px(ctx, cx - 9, cy - 30, 18, 30, color);
+  px(ctx, cx - 9, cy - 30, 18, 3, lighten(color, 0.18));
+  for (let i = 0; i < 3; i += 1) {
+    const y = cy - 27 + i * 9;
+    px(ctx, cx - 7, y, 14, 7, darken(color, 0.16));
+    px(ctx, cx - 2, y + 3, 4, 2, lighten(color, 0.3));
+  }
+}
+
 // ── furniture ───────────────────────────────────────────────────────────────
 /** Office chair, seen from above-behind: backrest on top, seat below. */
 export function chair(ctx, cx, cy, color = '#454c5e') {
