@@ -263,6 +263,30 @@ export function hideWindows(hwnds) {
   return ask('hide', { windows: list }, 20_000);
 }
 
+/**
+ * What these windows *are*, in enough detail to open them again later.
+ *
+ * Read once, when the user asks to save a group — never on a timer. The
+ * expensive part is walking a browser's accessibility tree for its address bar,
+ * and doing that every few seconds to keep a URL fresh would be paying a
+ * constant cost for something wanted twice a week.
+ *
+ * @returns {Promise<Array<{hwnd:number, exe:string, cmd:string, url:string}>>}
+ */
+export async function captureWindows(hwnds) {
+  const list = [...new Set(hwnds.filter(Number.isFinite))];
+  if (!list.length) return [];
+  const res = await ask('capture', { windows: list }, 30_000);
+  return res?.ok ? (res.items ?? []) : [];
+}
+
+/** Open saved windows back up. Pages that share a browser come back as tabs. */
+export function launchItems(items) {
+  const list = (items ?? []).filter((i) => i && (i.url || i.exe || i.doc));
+  if (!list.length) return Promise.resolve({ ok: true, count: 0 });
+  return ask('launch', { items: list }, 30_000);
+}
+
 /** Bring one person to the front — for a tab, select it inside its window. */
 export function focusPerson({ hwnd, rt }) {
   if (!Number.isFinite(hwnd)) return Promise.resolve({ ok: false });

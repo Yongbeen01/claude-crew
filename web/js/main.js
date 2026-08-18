@@ -23,6 +23,8 @@ const store = {
   /** everything open on this PC, one person per window or browser tab */
   desktop: { supported: true, people: [] },
   groups: [],
+  /** 창을 다 닫은 뒤에도 남는 그룹 — 다시 열기 위한 레시피 */
+  savedGroups: [],
   meta: { maxSeats: 4 },
   /** personId -> [{role, text, at}] */
   chats: new Map(),
@@ -101,6 +103,20 @@ const el = {
   manualSub: document.getElementById('manual-sub'),
   manualBody: document.getElementById('manual-body'),
   manualClose: document.getElementById('manual-close'),
+  group: document.getElementById('group'),
+  groupTitle: document.getElementById('group-title'),
+  groupName: document.getElementById('group-name'),
+  groupList: document.getElementById('group-list'),
+  groupNote: document.getElementById('group-note'),
+  groupClose: document.getElementById('group-close'),
+  groupDelete: document.getElementById('group-delete'),
+  groupSave: document.getElementById('group-save'),
+  savedPanel: document.getElementById('saved-panel'),
+  saved: document.getElementById('saved'),
+  savedAllBtn: document.getElementById('saved-all'),
+  savedListModal: document.getElementById('saved-list'),
+  savedAllList: document.getElementById('saved-all-list'),
+  savedListClose: document.getElementById('saved-list-close'),
 };
 
 // ── chat width ───────────────────────────────────────────────────────────
@@ -216,24 +232,19 @@ office.onDropAtDoor = (id) => askToLeave(id);
 office.onWindowClick = (key) => api('/api/desktop/focus', { method: 'POST', body: { key } });
 office.onWindowDrop = async (key, target) => {
   if (target === 'new') {
-    const name = prompt('새 그룹 이름', '새 그룹');
-    if (!name?.trim()) return;
-    await api('/api/desktop/groups', { method: 'POST', body: { name: name.trim(), key } });
+    // Made the moment you let go, then opened so you can say what it is for.
+    // A browser prompt before the group exists asks you to name something you
+    // cannot see yet, and cancelling loses the drag entirely.
+    const r = await api('/api/desktop/groups', { method: 'POST', body: { name: '새 그룹', key } });
+    if (r?.group?.id) setTimeout(() => openGroupModal(r.group.id), 120);
     return;
   }
   await api('/api/desktop/assign', { method: 'POST', body: { key, groupId: target } });
 };
+office.onGroupClick = (id) => openGroupModal(id);
 office.onGroupToggle = (id) => api(`/api/desktop/groups/${id}/toggle`, { method: 'POST' });
-office.onGroupRename = async (id) => {
-  const group = store.groups.find((g) => g.id === id);
-  const name = prompt('그룹 이름 (비우면 그룹을 없앱니다)', group?.name ?? '');
-  if (name === null) return;
-  if (!name.trim()) {
-    await api(`/api/desktop/groups/${id}`, { method: 'DELETE' });
-    return;
-  }
-  await api(`/api/desktop/groups/${id}`, { method: 'POST', body: { name: name.trim() } });
-};
+// The nameplate opens the group too — renaming lives inside it now.
+office.onGroupRename = (id) => openGroupModal(id);
 
 // ── api ──────────────────────────────────────────────────────────────────
 async function api(path, opts = {}) {
@@ -255,6 +266,7 @@ function connect() {
       crew: s.crew, personas: s.personas, activity: s.activity, approvals: s.approvals,
       jobs: s.jobs, tasks: s.tasks, system: s.system, usage: s.usage, meta: s.meta,
       update: s.update, desktop: s.desktop ?? store.desktop, groups: s.groups ?? [],
+      savedGroups: s.savedGroups ?? [],
     });
     el.version.textContent = `v${s.meta?.version ?? ''}`;
     renderAll();
@@ -263,8 +275,9 @@ function connect() {
   es.addEventListener('crew', (e) => { store.crew = JSON.parse(e.data); renderCrew(); });
   es.addEventListener('update', (e) => { store.update = JSON.parse(e.data); renderUpdate(); });
   es.addEventListener('approvals', (e) => { store.approvals = JSON.parse(e.data); renderApprovals(); });
-  es.addEventListener('desktop', (e) => { store.desktop = JSON.parse(e.data); renderWindows(); });
-  es.addEventListener('groups', (e) => { store.groups = JSON.parse(e.data); renderWindows(); });
+  es.addEventListener('desktop', (e) => { store.desktop = JSON.parse(e.data); renderWindows(); if (openGroupId) renderGroupMembers(); });
+  es.addEventListener('groups', (e) => { store.groups = JSON.parse(e.data); renderWindows(); if (openGroupId) renderGroupMembers(); });
+  es.addEventListener('saved-groups', (e) => { store.savedGroups = JSON.parse(e.data); renderSavedGroups(); });
   es.addEventListener('jobs', (e) => { store.jobs = JSON.parse(e.data); renderJobs(); });
   es.addEventListener('tasks', (e) => { store.tasks = JSON.parse(e.data); renderTasks(); });
   es.addEventListener('personas', (e) => { store.personas = JSON.parse(e.data); });
@@ -931,9 +944,8 @@ function renderWindows() {
 }
 
 el.groupNew.addEventListener('click', async () => {
-  const name = prompt('새 그룹 이름', '새 그룹');
-  if (!name?.trim()) return;
-  await api('/api/desktop/groups', { method: 'POST', body: { name: name.trim() } });
+  const r = await api('/api/desktop/groups', { method: 'POST', body: { name: '새 그룹' } });
+  if (r?.group?.id) setTimeout(() => openGroupModal(r.group.id, el.groupNew), 120);
 });
 
 function renderUsage() {
@@ -1059,6 +1071,144 @@ async function openManual(jobName, origin) {
 
 el.manualClose.addEventListener('click', () => closeSheet(el.manual));
 el.manual.addEventListener('click', (e) => { if (e.target === el.manual) closeSheet(el.manual); });
+
+// ── groups ───────────────────────────────────────────────────────────────
+/**
+ * One group, opened up.
+ *
+ * A group on the floor is a ring of little people around a table — legible at a
+ * glance, useless for "wait, which five windows are these?". This is that
+ * answer, plus the two things you would want next: name it after the work, or
+ * keep it for a day when none of it is open.
+ */
+let openGroupId = null;
+
+function groupMembers(id) {
+  return (store.desktop?.people ?? []).filter((p) => p.groupId === id);
+}
+
+function openGroupModal(id, origin) {
+  const group = (store.groups ?? []).find((g) => g.id === id);
+  if (!group) return;
+  openGroupId = id;
+  el.groupTitle.textContent = group.name || '그룹';
+  el.groupName.value = group.name ?? '';
+  renderGroupMembers();
+  openSheet(el.group, origin);
+  el.groupName.focus();
+  el.groupName.select();
+}
+
+function renderGroupMembers() {
+  const members = groupMembers(openGroupId);
+  el.groupList.innerHTML = '';
+  if (!members.length) {
+    el.groupList.innerHTML = '<p class="muted">이 그룹에 든 창이 없습니다.</p>';
+  }
+  for (const m of members) {
+    const row = document.createElement('div');
+    row.className = 'win-row';
+    row.innerHTML = '<i></i><b></b><small></small>';
+    row.querySelector('i').textContent = m.app || '창';
+    row.querySelector('b').textContent = m.name;
+    row.querySelector('small').textContent = m.minimized ? '내려둠' : '';
+    row.title = `${m.app} — ${m.name}`;
+    row.addEventListener('click', () => api('/api/desktop/focus', { method: 'POST', body: { key: m.key } }));
+    el.groupList.appendChild(row);
+  }
+  const saved = (store.savedGroups ?? []).find((s) => s.fromGroupId === openGroupId);
+  el.groupNote.textContent = saved
+    ? `${new Date(saved.savedAt).toLocaleString('ko-KR')} 에 저장해 뒀습니다 — 다시 저장하면 지금 상태로 바뀝니다.`
+    : '저장해 두면 창을 다 닫은 뒤에도 이 목록 그대로 다시 열 수 있습니다.';
+}
+
+el.groupClose.addEventListener('click', () => closeSheet(el.group));
+el.group.addEventListener('click', (e) => { if (e.target === el.group) closeSheet(el.group); });
+
+// The name is the work this group is for, so it is saved as you leave the field
+// rather than behind a button you might not press.
+el.groupName.addEventListener('change', () => {
+  if (!openGroupId) return;
+  const name = el.groupName.value.trim();
+  if (!name) return;
+  api(`/api/desktop/groups/${openGroupId}`, { method: 'POST', body: { name } });
+});
+
+el.groupDelete.addEventListener('click', async () => {
+  if (!openGroupId) return;
+  await api(`/api/desktop/groups/${openGroupId}`, { method: 'DELETE' });
+  closeSheet(el.group);
+  openGroupId = null;
+});
+
+el.groupSave.addEventListener('click', async () => {
+  if (!openGroupId) return;
+  el.groupSave.disabled = true;
+  el.groupSave.textContent = '읽는 중…';
+  // The addresses are read HERE, once — see savedGroups.js on why not on a timer.
+  const r = await api(`/api/desktop/groups/${openGroupId}/save`, {
+    method: 'POST', body: { name: el.groupName.value.trim() },
+  });
+  el.groupSave.disabled = false;
+  el.groupSave.textContent = '저장하기';
+  if (r?.ok) closeSheet(el.group);
+});
+
+// ── saved groups ─────────────────────────────────────────────────────────
+function savedCard(g, { compact = true } = {}) {
+  const card = document.createElement('div');
+  card.className = 'job-card';
+  card.innerHTML = '<b></b><small></small>';
+  card.querySelector('b').textContent = g.name;
+  const apps = [...new Set(g.items.map((i) => i.app).filter(Boolean))].slice(0, 3).join(', ');
+  card.querySelector('small').textContent = compact
+    ? `창 ${g.items.length}개${apps ? ` · ${apps}` : ''}`
+    : `창 ${g.items.length}개 · ${new Date(g.savedAt).toLocaleDateString('ko-KR')}${apps ? ` · ${apps}` : ''}`;
+  card.title = g.items.map((i) => `${i.app} — ${i.title}`).join('\n');
+  card.addEventListener('click', async () => {
+    card.querySelector('small').textContent = '여는 중…';
+    const r = await api(`/api/saved-groups/${g.id}/open`, { method: 'POST' });
+    card.querySelector('small').textContent = r?.count
+      ? `${r.count}개 열었습니다`
+      : '이미 다 열려 있습니다';
+    setTimeout(renderSavedGroups, 2500);
+  });
+  return card;
+}
+
+function renderSavedGroups() {
+  const list = store.savedGroups ?? [];
+  el.savedPanel.hidden = list.length === 0;
+  el.savedAllBtn.hidden = list.length <= 3;
+  el.saved.innerHTML = '';
+  // Three is what fits without the panel becoming a list to scroll; the rest
+  // are one click away rather than gone.
+  for (const g of list.slice(0, 3)) el.saved.appendChild(savedCard(g));
+}
+
+el.savedAllBtn.addEventListener('click', (e) => {
+  el.savedAllList.innerHTML = '';
+  for (const g of store.savedGroups ?? []) {
+    const row = document.createElement('div');
+    row.className = 'saved-row';
+    row.appendChild(savedCard(g, { compact: false }));
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'ghost tiny';
+    del.textContent = '지우기';
+    del.addEventListener('click', async () => {
+      await api(`/api/saved-groups/${g.id}`, { method: 'DELETE' });
+      el.savedAllBtn.click();
+    });
+    row.appendChild(del);
+    el.savedAllList.appendChild(row);
+  }
+  openSheet(el.savedListModal, e.currentTarget);
+});
+el.savedListClose.addEventListener('click', () => closeSheet(el.savedListModal));
+el.savedListModal.addEventListener('click', (e) => {
+  if (e.target === el.savedListModal) closeSheet(el.savedListModal);
+});
 
 function renderJobs() {
   // A job only becomes a card once it has been done at least once; a one-off
@@ -1296,6 +1446,7 @@ function renderAll() {
   renderApprovals();
   renderTasks();
   renderJobs();
+  renderSavedGroups();
   renderWindows();
   renderChat();
 }

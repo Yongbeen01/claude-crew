@@ -963,6 +963,65 @@ button.ghost:active { box-shadow: inset 0 0 0 3px var(--wood-dark), inset 0 -3px
   box-shadow: inset 0 0 0 3px var(--wood-dark), inset 0 3px 0 3px #e89383;
 }
 
+/* 그룹 안의 창 목록 — 프로그램 이름이 먼저, 창 이름이 다음. 누르면 그 창이
+ * 앞으로 나온다. */
+.win-list {
+  max-height: min(46vh, 380px);
+  overflow-y: auto;
+  display: grid;
+  gap: 5px;
+  background: var(--paper-hi);
+  clip-path: var(--notch-sm);
+  box-shadow: inset 0 0 0 3px var(--wood-dark);
+  padding: 10px 11px;
+}
+.win-list:empty { display: none; }
+.win-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  clip-path: var(--notch-sm);
+  cursor: pointer;
+  transition: background var(--calm);
+}
+.win-row:hover { background: var(--paper-2); }
+.win-row i {
+  font-style: normal;
+  font-size: 10px; font-weight: 800; letter-spacing: .03em;
+  padding: 1px 6px;
+  clip-path: var(--notch-sm);
+  background: var(--wood);
+  color: var(--paper-hi);
+  white-space: nowrap;
+}
+.win-row b {
+  font-size: 12.5px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.win-row small { color: var(--ink-mute); font-size: 11px; white-space: nowrap; }
+
+/* 이름 한 줄 입력 */
+.line-input {
+  background: var(--paper-hi);
+  border: none;
+  clip-path: var(--notch-sm);
+  box-shadow: inset 0 0 0 3px var(--wood-dark);
+  padding: 8px 10px;
+  color: var(--ink);
+  font-weight: 700;
+  outline: none;
+  transition: box-shadow var(--calm);
+}
+.line-input:focus { box-shadow: inset 0 0 0 3px var(--accent-dark), inset 0 0 0 6px var(--accent); }
+
+button.danger { color: var(--bad-dark); box-shadow: inset 0 0 0 3px var(--bad-dark); }
+button.danger:hover { background: var(--bad); color: #fff0ec; }
+.sheet-actions .tiny:first-child { margin-right: auto; }
+
+.saved-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+
 /* 매뉴얼 — 이 일을 해 본 사람들이 남긴 것. 길어질 수 있으므로 시트 안에서
  * 스스로 스크롤하고, 본문은 대화창과 같은 마크다운 서식을 쓴다. */
 .manual-body {

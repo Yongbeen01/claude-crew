@@ -1,7 +1,7 @@
 import {
   px, floorPatch, rug, room, shelf, whiteboard, wallClock, windowPane,
   plant, cooler, printer, chair, desk, emptyDesk, character, bubble, avatarOf,
-  door, roundTable, zoneFloor, partition,
+  door, roundTable, zoneFloor, partition, sofa, coffeeTable, cabinet,
 } from './sprites.js';
 
 /**
@@ -74,6 +74,10 @@ const LOOSE_ROW_H = 44;
 const WIN_MIN_W = 120;
 const ZONE_MIN_H = 196;
 
+/* 창 구역을 위(그룹)/아래(아직 안 묶은 것)로 가르는 고정 비율과 그 사이 틈. */
+const GROUP_BAND = 0.56;
+const BAND_GAP = 12;
+
 /** Monitor glow + desk lamp per state. */
 const LOOK = {
   starting: { screen: '#1d2733', accent: '#8d8d99', scan: false, lamp: null },
@@ -134,7 +138,7 @@ export class Office {
     this.groupPlates = new Map();
     // Two standing signs, so it is never a guess which half of the room is
     // which. Created once — they are the only fixtures in the overlay.
-    this.zoneLabels = ['일하는 사람들', '내가 열어둔 것들'].map((text) => {
+    this.zoneLabels = ['일하는 사람들', '묶어둔 그룹', '아직 안 묶은 창들'].map((text) => {
       const node = document.createElement('div');
       node.className = 'zlabel';
       node.textContent = text;
@@ -159,6 +163,8 @@ export class Office {
     this.onWindowDrop = () => {};
     this.onGroupToggle = () => {};
     this.onGroupRename = () => {};
+    /** tapping the table itself — the group opens up rather than being renamed */
+    this.onGroupClick = () => {};
 
     canvas.addEventListener('mousemove', (e) => this._onHover(e));
     canvas.addEventListener('mouseleave', () => { this.hoverSeat = null; });
@@ -238,9 +244,14 @@ export class Office {
       const winWant = showWin ? Math.max(WIN_MIN_W, cols * POD_W) : 0;
       const lCols = Math.max(4, Math.floor((winWant - 24) / LOOSE_STEP));
       const ww = chromeW + winWant;
+      // 두 띠가 각자 자기 몫(56% / 44%) 안에 들어가야 하므로, 필요한 전체
+      // 높이는 "더 빡빡한 쪽이 요구하는 높이" 다.
+      const wantPod = Math.ceil(podCount / cols) * POD_H;
+      const wantLoose = Math.ceil(loose.length / lCols) * LOOSE_ROW_H;
       const hh = chromeH + Math.max(
         aiH, ZONE_MIN_H,
-        Math.ceil(podCount / cols) * POD_H + Math.ceil(loose.length / lCols) * LOOSE_ROW_H + 16,
+        Math.round(wantPod / GROUP_BAND) + BAND_GAP,
+        Math.round(wantLoose / (1 - GROUP_BAND)) + BAND_GAP,
       );
       const s = Math.max(1, Math.min(MAX_SCALE, Math.floor(Math.min(availW / ww, availH / hh))));
       if (!best || s > best.s) best = { s, ww, hh };
@@ -276,13 +287,17 @@ export class Office {
       cells.push({ seat, x, y, cx: x + CELL_W / 2, standY: y + STAND_Y, deskY: y + DESK_Y });
     }
 
-    // The waiting area is anchored to the bottom of the zone and the tables sit
-    // above it, so extra height opens up between them instead of leaving a gap
-    // under everything.
+    // The windows half is itself cut in two, and the cut does NOT move with how
+    // much is in each half.
+    //
+    // A band you can only drop into once something is already in it is not a
+    // target — you could never make the first group. So the tables get a fixed
+    // share of the height whether or not any tables exist, and the waiting area
+    // keeps the rest whether or not anyone is waiting in it.
     const winX = x0 + aiW + DIVIDER;
-    const looseH = looseRows * LOOSE_ROW_H;
-    const looseTop = y0 + zoneH - looseH - 4;
-    const podBand = (looseRows ? looseTop - 10 : y0 + zoneH) - y0;
+    const podBand = Math.max(88, Math.round(zoneH * GROUP_BAND));
+    const looseTop = y0 + podBand + BAND_GAP;
+    const looseH = y0 + zoneH - looseTop;
     const podStepX = winW / podCols;
     // Normally a table gets its full height and any surplus on top. The floor
     // is there for the case the surplus is negative — a zone squeezed by a lot
@@ -303,10 +318,16 @@ export class Office {
       i += 1;
     }
 
+    // 아래 띠 안에서 세로 가운데로. 띠 높이는 내용과 무관하게 고정이라,
+    // 맨 위에 붙여 두면 사람 몇 명이 천장에 매달린 것처럼 보이고 나머지
+    // 공간이 통째로 빈다.
+    const looseBandH = y0 + zoneH - looseTop;
+    const looseBlockH = looseRows * LOOSE_ROW_H;
+    const looseY0 = looseTop + Math.max(6, Math.round((looseBandH - looseBlockH) / 2));
     const seatsLoose = loose.map((p, n) => ({
       person: p,
       x: winX + 14 + (n % looseCols) * LOOSE_STEP,
-      y: looseTop + Math.floor(n / looseCols) * LOOSE_ROW_H + 24,
+      y: looseY0 + Math.floor(n / looseCols) * LOOSE_ROW_H + 24,
     }));
 
     return {
@@ -314,7 +335,7 @@ export class Office {
       ai: { x: x0, y: y0, w: aiW, h: zoneH, cells },
       win: {
         x: winX, y: y0, w: winW, h: zoneH, pods, loose: seatsLoose,
-        looseTop, hasLoose: seatsLoose.length > 0,
+        looseTop, looseH, hasLoose: seatsLoose.length > 0,
       },
       divider: { x: x0 + aiW + Math.round((DIVIDER - 4) / 2), y: y0 - 6, h: zoneH + 6 },
       door: { x: w - WALL, y: corridorY - DOOR_H / 2, h: DOOR_H, cx: w - WALL - 6, cy: corridorY },
@@ -390,11 +411,16 @@ export class Office {
     whiteboard(ctx, Math.round(g.ai.x + g.ai.w - 44), 8);
     if (w > 420) windowPane(ctx, w - 68, 10);
 
-    // Zone floors — the only thing that says these are two different places.
+    // Three floors, three colours — the room is desks, then tables, then the
+    // waiting area, and each is a different place to be.
     zoneFloor(ctx, g.ai.x - 6, g.ai.y - 6, g.ai.w + 12, g.zoneH + 10, '#f0b45a');
     if (g.showWin) {
-      zoneFloor(ctx, g.win.x - 6, g.win.y - 6, g.win.w + 12, g.zoneH + 10, '#7fd1c0');
+      const bandH = (g.win.looseTop - BAND_GAP / 2) - (g.win.y - 6);
+      zoneFloor(ctx, g.win.x - 6, g.win.y - 6, g.win.w + 12, bandH, '#7fd1c0');
+      zoneFloor(ctx, g.win.x - 6, g.win.looseTop - BAND_GAP / 2, g.win.w + 12,
+        (g.win.y + g.zoneH + 4) - (g.win.looseTop - BAND_GAP / 2), '#a77bd8');
       partition(ctx, g.divider.x, g.divider.y, g.divider.h);
+      this._dressWindows(ctx, g);
     }
 
     // floor props tucked into the corridor
@@ -430,9 +456,17 @@ export class Office {
     this.zoneLabels[0].hidden = !g.showWin;
     this.zoneLabels[0].style.transform =
       `translate(${(g.ai.x + g.ai.w / 2) * this.scale}px, ${signY}px) translate(-50%, -100%)`;
+    // The two window bands are stacked, so their signs cannot both hang on the
+    // back wall — the upper one does, and the lower one sits on the line that
+    // divides them, which is also the thing it is naming.
     this.zoneLabels[1].hidden = !g.showWin;
     this.zoneLabels[1].style.transform =
       `translate(${(g.win.x + g.win.w / 2) * this.scale}px, ${signY}px) translate(-50%, -100%)`;
+    // Hung just *inside* the lower band rather than above its line: over the
+    // line it lands among whatever is sitting at the foot of the group band.
+    this.zoneLabels[2].hidden = !g.showWin;
+    this.zoneLabels[2].style.transform =
+      `translate(${(g.win.x + g.win.w / 2) * this.scale}px, ${(g.win.looseTop + 2) * this.scale}px) translate(-50%, 0)`;
   }
 
   _drawCrew(ctx, g, now) {
@@ -627,6 +661,46 @@ export class Office {
     });
   }
 
+  /**
+   * Furnishing the two window bands.
+   *
+   * Drawn under everything and never interactive — this is set dressing, and
+   * its whole job is to make the upper band read as *a place with tables in it*
+   * and the lower one as *the couch by the door where things wait*. Colour
+   * alone made them two rectangles.
+   *
+   * Everything is placed off the band's own geometry rather than at fixed
+   * coordinates, because both bands resize with the window; and each piece is
+   * dropped only when there is room for it, so a small room is bare rather than
+   * cluttered with furniture growing through the walls.
+   */
+  _dressWindows(ctx, g) {
+    const left = g.win.x;
+    const right = g.win.x + g.win.w;
+    const bandBottom = g.win.looseTop - BAND_GAP;
+
+    // Upper band — the meeting side.
+    if (g.win.w > 150) {
+      cabinet(ctx, left + 14, bandBottom - 6);
+      plant(ctx, right - 12, bandBottom - 4);
+    } else if (g.win.w > 96) {
+      plant(ctx, right - 12, bandBottom - 4);
+    }
+    if (g.win.w > 260) whiteboard(ctx, Math.round(left + g.win.w / 2 - 22), 8);
+
+    // Lower band — the lounge. The sofa faces into the room, table in front.
+    const y = g.win.looseTop;
+    const floor = g.win.y + g.zoneH;
+    const mid = Math.round((y + floor) / 2);
+    if (g.win.w > 170 && floor - y > 40) {
+      sofa(ctx, left + 34, mid + 12);
+      coffeeTable(ctx, left + 70, mid + 14);
+      plant(ctx, right - 14, floor - 2);
+    } else if (g.win.w > 110) {
+      coffeeTable(ctx, left + 24, mid + 12);
+    }
+  }
+
   // ── the windows zone ──────────────────────────────────────────────────────
   _drawWindows(ctx, g, now) {
     const over = (this.drag?.kind === 'win' ? this.drag.over : null) ?? this.dropHint;
@@ -634,9 +708,15 @@ export class Office {
     // Hit testing runs back to front, so the order these go in *is* the
     // stacking order: the zone is under the tables, and the tables are under
     // the people sitting at them.
-    // Empty floor in this zone is a drop target too — it makes a new table.
+    // Two targets, not one: empty floor in the upper band makes a new table,
+    // empty floor in the lower one takes a window back out of its group.
     this.hitboxes.push({
-      kind: 'zone', zone: 'windows', x: g.win.x - 6, y: g.win.y - 6, w: g.win.w + 12, h: g.zoneH + 10,
+      kind: 'zone', zone: 'groups', x: g.win.x - 6, y: g.win.y - 6,
+      w: g.win.w + 12, h: (g.win.looseTop - BAND_GAP / 2) - (g.win.y - 6),
+    });
+    this.hitboxes.push({
+      kind: 'zone', zone: 'loose', x: g.win.x - 6, y: g.win.looseTop - BAND_GAP / 2,
+      w: g.win.w + 12, h: (g.win.y + g.zoneH + 4) - (g.win.looseTop - BAND_GAP / 2),
     });
 
     for (const pod of g.win.pods) {
@@ -654,18 +734,20 @@ export class Office {
       for (const s of pod.seats) this._drawWindowPerson(ctx, s.person, s.x, s.y, now);
     }
 
-    if (g.win.hasLoose) {
-      const y = g.win.looseTop;
-      const h = g.win.y + g.win.h - y;
-      if (over === 'loose') {
-        ctx.save();
-        ctx.globalAlpha = 0.12;
-        px(ctx, g.win.x + 4, y - 4, g.win.w - 8, h, '#f0b45a');
-        ctx.restore();
-      }
-      px(ctx, g.win.x + 4, y - 5, g.win.w - 8, 1, '#ffffff12');
-      for (const s of g.win.loose) this._drawWindowPerson(ctx, s.person, s.x, s.y, now);
+    // The lower band is always drawn, empty or not — it is where you drop a
+    // window to take it back out of a group, and you cannot aim at nothing.
+    const y = g.win.looseTop;
+    const h = g.win.y + g.zoneH - y;
+    if (over === 'loose') {
+      ctx.save();
+      ctx.globalAlpha = 0.12;
+      px(ctx, g.win.x + 4, y - 4, g.win.w - 8, h, '#f0b45a');
+      ctx.restore();
     }
+    // A low rail rather than a hairline: this is a real boundary in the room.
+    px(ctx, g.win.x + 2, y - 7, g.win.w - 4, 2, '#00000026');
+    px(ctx, g.win.x + 2, y - 7, g.win.w - 4, 1, '#ffffff1c');
+    for (const s of g.win.loose) this._drawWindowPerson(ctx, s.person, s.x, s.y, now);
   }
 
   _drawWindowPerson(ctx, person, x, y, now) {
@@ -986,7 +1068,8 @@ export class Office {
     const geom = this.geom;
     // Below the tables is the waiting area — dropping there means "not part of
     // any of this".
-    if (geom?.win.hasLoose && p.y > geom.win.looseTop - 6) return 'loose';
+    // 경계는 내용과 무관하게 늘 같은 자리에 있다.
+    if (geom && p.y > geom.win.looseTop - BAND_GAP / 2) return 'loose';
     return 'new';
   }
 
@@ -1017,6 +1100,8 @@ export class Office {
       else this.onSeatClick(hit.seat, { x: e.clientX, y: e.clientY });
     } else if (hit.kind === 'win') {
       this.onWindowClick(hit.person.key);
+    } else if (hit.kind === 'pod') {
+      this.onGroupClick(hit.groupId);
     }
   }
 }

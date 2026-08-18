@@ -10,6 +10,7 @@ import * as jobs from './jobs.js';
 import * as timers from './timers.js';
 import { handle as handleMcp, personIdForToken } from './mcpServer.js';
 import * as approvals from './approvals.js';
+import * as savedGroups from './savedGroups.js';
 import { updateStatus, checkForUpdate, applyUpdate } from './update.js';
 import { toolboxStatus } from './toolbox.js';
 import { desktopState, focusPerson, refreshDesktop } from './desktop.js';
@@ -60,6 +61,7 @@ bus.on('toolbox', (t) => broadcast('toolbox', t));
 // 이 컴퓨터에 열려 있는 창들, 그리고 그 창들을 묶은 그룹.
 bus.on('desktop', (d) => broadcast('desktop', d));
 bus.on('groups', (g) => broadcast('groups', g));
+bus.on('saved-groups', (g) => broadcast('saved-groups', g));
 bus.on('phase', (p) => broadcast('phase', p));
 bus.on('tool', (t) => broadcast('tool', t));
 bus.on('turn-end', (t) => broadcast('turn-end', t));
@@ -121,6 +123,7 @@ function fullState() {
     toolbox: toolboxStatus(),
     desktop: desktopState(),
     groups: groups.listGroups(),
+    savedGroups: savedGroups.listSaved(),
     activity: recentActivity(),
     usage: usageReport(),
     meta: {
@@ -329,8 +332,32 @@ export function createServer() {
       return json(res, 200, { ok: true, group });
     }
 
+    // ---- saved groups ------------------------------------------------------
+    if (p === '/api/saved-groups') return json(res, 200, { groups: savedGroups.listSaved() });
+
+    if (p.startsWith('/api/saved-groups/')) {
+      const [, , , id, action] = p.split('/');
+      if (action === 'open' && req.method === 'POST') {
+        try { return json(res, 200, await savedGroups.openSaved(id)); }
+        catch (e) { return json(res, 400, { ok: false, error: String(e.message ?? e) }); }
+      }
+      if (req.method === 'DELETE') return json(res, 200, { ok: savedGroups.deleteSaved(id) });
+      if (req.method === 'POST') {
+        const body = await readBody(req);
+        const g = savedGroups.renameSaved(id, body.name);
+        return json(res, g ? 200 : 404, { ok: !!g, group: g });
+      }
+      return json(res, 200, savedGroups.getSaved(id) ?? { error: 'unknown saved group' });
+    }
+
     if (p.startsWith('/api/desktop/groups/')) {
       const [, , , , id, action] = p.split('/');
+      // Freeze this group into something that can be opened again next week.
+      if (action === 'save' && req.method === 'POST') {
+        const body = await readBody(req).catch(() => ({}));
+        try { return json(res, 200, { ok: true, saved: await savedGroups.saveGroup(id, body.name) }); }
+        catch (e) { return json(res, 400, { ok: false, error: String(e.message ?? e) }); }
+      }
       if (!action && (req.method === 'POST' || req.method === 'PATCH')) {
         const body = await readBody(req);
         const group = groups.renameGroup(id, body.name);

@@ -68,6 +68,15 @@
         </div>
       </section>
 
+      <section class="panel" id="saved-panel" hidden>
+        <h2>저장된 그룹</h2>
+        <p class="hint-sm">눌러서 그때 열려 있던 창들을 한 번에 다시 엽니다.</p>
+        <div id="saved" class="jobs"></div>
+        <div class="row end">
+          <button type="button" id="saved-all" class="ghost tiny" hidden>전체 보기</button>
+        </div>
+      </section>
+
       <section class="panel">
         <h2>기록</h2>
         <ul id="activity" class="activity"></ul>
@@ -131,6 +140,35 @@
     <div class="sheet-actions">
       <button type="button" id="leave-no" class="ghost">아니요</button>
       <button type="button" id="leave-yes">예</button>
+    </div>
+  </div>
+</div>
+
+<!-- 그룹 하나 — 무슨 창이 들어 있는지, 이름, 저장·삭제 -->
+<div id="group" class="modal" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="group-title">
+    <h3 id="group-title">그룹</h3>
+    <label class="field">
+      <span>이 그룹의 이름 (하는 일)</span>
+      <input type="text" id="group-name" class="line-input" maxlength="40" autocomplete="off">
+    </label>
+    <div id="group-list" class="win-list"></div>
+    <p class="hint-sm" id="group-note"></p>
+    <div class="sheet-actions">
+      <button type="button" id="group-delete" class="ghost tiny danger">그룹 없애기</button>
+      <button type="button" id="group-close" class="ghost">닫기</button>
+      <button type="button" id="group-save">저장하기</button>
+    </div>
+  </div>
+</div>
+
+<!-- 저장된 그룹 전체 -->
+<div id="saved-list" class="modal" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="saved-list-title">
+    <h3 id="saved-list-title">저장된 그룹</h3>
+    <div id="saved-all-list" class="win-list"></div>
+    <div class="sheet-actions">
+      <button type="button" id="saved-list-close" class="ghost">닫기</button>
     </div>
   </div>
 </div>

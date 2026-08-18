@@ -14,6 +14,12 @@
 
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
+# ...and the same going IN. Every command until now carried only ASCII payloads
+# (ids, window handles), so this was invisible; the first request holding a
+# window title - which is Korean, or has the "..." a truncated one ends in -
+# arrived mangled, failed to parse, and was silently skipped. The caller then
+# waited out its whole timeout for a reply that was never coming.
+[Console]::InputEncoding = [Text.Encoding]::UTF8
 
 Add-Type @"
 using System;
@@ -224,11 +230,71 @@ function Reply($obj) {
 
 Reply ([pscustomobject]@{ ready = $true; uia = $uia })
 
+# ---- saving a group, and putting it back ---------------------------------
+#
+# What a window IS, in enough detail to open it again later: the program, the
+# arguments it was started with (which is where a document path lives), and for
+# a browser the page in front.
+#
+# Only the FRONT tab's address can be read. A background tab's URL is not in the
+# accessibility tree - the omnibox shows one page at a time - and the only way
+# to see the others would be to click through them, stealing focus. So a saved
+# browser window remembers the page you were on when you saved it.
+
+function Get-ActiveUrl($h) {
+  if (-not $uia) { return '' }
+  try {
+    $A = [System.Windows.Automation.AutomationElement]
+    $root = $A::FromHandle([IntPtr]$h)
+    if ($null -eq $root) { return '' }
+    $cond = New-Object System.Windows.Automation.PropertyCondition(
+      $A::ControlTypeProperty, [System.Windows.Automation.ControlType]::Edit)
+    foreach ($e in $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $cond)) {
+      try {
+        $vp = $e.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+        $v = [string]$vp.Current.Value
+        if (-not $v) { continue }
+        if ($v -match '^(https?|file)://') { return $v }
+        # The omnibox hides the scheme: "docs.anthropic.com/en/x". Put it back.
+        # The port has to be allowed for - "127.0.0.1:4321/x" is a URL too, and
+        # requiring a slash straight after the host silently dropped every one
+        # of them.
+        if ($v -match '^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(/|$)') { return "http://$v" }
+        if ($v -match '^[\w-]+(\.[\w-]+)+(:\d+)?(/|$)') { return "https://$v" }
+      } catch { }
+    }
+  } catch { }
+  return ''
+}
+
+# Windows hands programs one command-line STRING, not an argv array, so the
+# document path has to be cut back out of it.
+function Split-CommandLine($cmd) {
+  $out = New-Object System.Collections.ArrayList
+  $cur = ''
+  $inQ = $false
+  foreach ($ch in ([string]$cmd).ToCharArray()) {
+    if ($ch -eq '"') { $inQ = -not $inQ; continue }
+    if (($ch -eq ' ') -and (-not $inQ)) {
+      if ($cur.Length -gt 0) { [void]$out.Add($cur); $cur = '' }
+      continue
+    }
+    $cur += $ch
+  }
+  if ($cur.Length -gt 0) { [void]$out.Add($cur) }
+  return $out
+}
+
 while ($null -ne ($line = [Console]::In.ReadLine())) {
   $line = $line.Trim()
   if (-not $line) { continue }
   $req = $null
-  try { $req = $line | ConvertFrom-Json } catch { continue }
+  # A line we cannot parse used to vanish without trace, and the caller sat
+  # through its timeout wondering. Say so on stderr - desktop.js keeps it.
+  try { $req = $line | ConvertFrom-Json } catch {
+    [Console]::Error.WriteLine("bad request line: " + $line.Substring(0, [Math]::Min(120, $line.Length)))
+    continue
+  }
   if ($req.cmd -eq 'quit') { break }
 
   try {
@@ -261,6 +327,102 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
         $ok = $true
         if ($req.rt) { $ok = Select-Tab $req.hwnd $req.rt }
         Reply ([pscustomobject]@{ id = $req.id; ok = $ok })
+      }
+      'capture' {
+        $out = New-Object System.Collections.ArrayList
+        foreach ($h in @($req.windows)) {
+          $exe = ''; $cmdline = ''; $url = ''
+          $wpid = 0
+          [void][CrewWin]::GetWindowThreadProcessId([IntPtr][int64]$h, [ref]$wpid)
+          if ($wpid -gt 0) {
+            $pn = ''
+            try {
+              $p = Get-Process -Id $wpid -ErrorAction Stop
+              $pn = $p.ProcessName.ToLower()
+              $exe = [string]$p.Path
+            } catch { }
+            try {
+              $ci = Get-CimInstance Win32_Process -Filter "ProcessId=$wpid" -ErrorAction Stop
+              $cmdline = [string]$ci.CommandLine
+            } catch { }
+            if ($BROWSERS -contains $pn) { $url = Get-ActiveUrl $h }
+          }
+          # The document, dug back out of the argument string. Opening THE FILE
+          # is better than opening the program: Windows picks the right app, and
+          # it still works when the program itself cannot be started by path.
+          $doc = ''
+          if ($cmdline) {
+            $parts = Split-CommandLine $cmdline
+            for ($i = 1; $i -lt $parts.Count; $i++) {
+              $cand = [string]$parts[$i]
+              if ($cand.StartsWith('-') -or $cand.StartsWith('/')) { continue }
+              try { if (Test-Path -LiteralPath $cand -PathType Leaf) { $doc = $cand; break } } catch { }
+            }
+          }
+          [void]$out.Add([pscustomobject]@{ hwnd = $h; exe = $exe; cmd = $cmdline; url = $url; doc = $doc })
+        }
+        Reply ([pscustomobject]@{ id = $req.id; ok = $true; items = @($out) })
+      }
+      'launch' {
+        # Pages that share a browser are opened in ONE call, so they come back
+        # as tabs of a single window instead of a window each.
+        $byBrowser = @{}
+        $plain = New-Object System.Collections.ArrayList
+        foreach ($it in @($req.items)) {
+          if ($it.url) {
+            $key = [string]$it.exe
+            if (-not $byBrowser.ContainsKey($key)) { $byBrowser[$key] = New-Object System.Collections.ArrayList }
+            [void]$byBrowser[$key].Add([string]$it.url)
+          } else {
+            [void]$plain.Add($it)
+          }
+        }
+        $n = 0
+        foreach ($key in $byBrowser.Keys) {
+          $urls = @($byBrowser[$key])
+          try {
+            if ($key -and (Test-Path -LiteralPath $key)) { Start-Process -FilePath $key -ArgumentList $urls }
+            else { foreach ($u in $urls) { Start-Process $u } }
+            $n += $urls.Count
+          } catch { }
+        }
+        # Three ways to bring a program back, best first.
+        #
+        # An executable path is NOT always usable: a Store app lives under
+        # C:\Program Files\WindowsApps, which is ACL'd away from the user, so
+        # Test-Path is false and Start-Process on it fails. Those apps are still
+        # reachable by their bare name through the App Execution Alias - which
+        # is also how you started them from Run in the first place.
+        $failed = New-Object System.Collections.ArrayList
+        foreach ($it in $plain) {
+          $done = $false
+          $exe = [string]$it.exe
+          $doc = [string]$it.doc
+          # 1. the document itself - Windows picks the app
+          if ($doc) {
+            try { Start-Process -FilePath $doc; $done = $true } catch { }
+          }
+          # 2. the program by full path, with whatever it was started with
+          if (-not $done -and $exe) {
+            try {
+              if (Test-Path -LiteralPath $exe) {
+                $parts = Split-CommandLine $it.cmd
+                # $argv, not $args - the latter is a PowerShell automatic variable
+                $argv = @()
+                if ($parts.Count -gt 1) { $argv = @($parts[1..($parts.Count - 1)]) }
+                if ($argv.Count -gt 0) { Start-Process -FilePath $exe -ArgumentList $argv }
+                else { Start-Process -FilePath $exe }
+                $done = $true
+              }
+            } catch { }
+          }
+          # 3. by bare name, through PATH / App Execution Alias
+          if (-not $done -and $exe) {
+            try { Start-Process -FilePath (Split-Path -Leaf $exe); $done = $true } catch { }
+          }
+          if ($done) { $n++ } else { [void]$failed.Add([string]$it.title) }
+        }
+        Reply ([pscustomobject]@{ id = $req.id; ok = $true; count = $n; failed = @($failed) })
       }
       default { Reply ([pscustomobject]@{ id = $req.id; ok = $false; error = 'unknown cmd' }) }
     }
