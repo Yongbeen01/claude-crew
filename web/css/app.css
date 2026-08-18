@@ -1,40 +1,84 @@
-/* claude-crew — cozy office, dark wood + warm paper.
+/* claude-crew — 2D 게임 UI. 동물의숲 계열의 따뜻한 나무·크림 팔레트.
  *
- * Craft notes (Apple's design language, translated to the web):
- *  · Tracking is size-specific — large text tightens, 11px labels loosen.
- *  · Chrome that floats over content is a translucent material, not an opaque bar.
- *  · Feedback lives on pointer-*down* and is instant; travel is left to springs in JS.
- *  · Where content meets floating chrome we fade the edge instead of ruling a line.
- *  · Reduced motion / transparency / contrast each get a real answer at the bottom.
+ * 규칙 (전부 의도된 제약):
+ *  · **글자는 글자다.** 비트맵 폰트도, 픽셀화도 쓰지 않는다. Pretendard 를 그대로
+ *    안티에일리어싱해서 읽기 좋게 둔다. 픽셀인 것은 *틀*이지 텍스트가 아니다.
+ *  · 곡선 없음. 모서리는 `--notch` 로 계단처럼 깎는다 — 전부 직각이라 확대해도
+ *    흐려지지 않는다. border-radius 는 이 파일에 한 군데도 없다.
+ *  · 흐림 없음. backdrop-filter 대신 불투명한 판때기와 체커보드를 쓴다.
+ *  · 그림자는 번지지 않는다. 오프셋 0 블러의 딱 떨어지는 덩어리 하나.
+ *  · 판때기는 3면 입체 — 위/왼쪽은 밝게, 아래/오른쪽은 어둡게. 2D 게임 UI 의 문법.
+ *  · 움직임은 steps() 로 끊어서 — 스프링이 아니라 프레임처럼 움직인다.
  */
 
+/* Pretendard 를 앱과 함께 들고 다닌다. 이미 깔려 있으면 그걸 쓰고(즉시),
+ * 없으면 번들된 파일을 쓴다 — 인터넷이 없어도 글꼴이 바뀌지 않는다. */
+@font-face {
+  font-family: 'Pretendard';
+  font-weight: 45 920;
+  font-style: normal;
+  font-display: swap;
+  src: local('Pretendard Variable'), local('Pretendard'),
+       url('/fonts/PretendardVariable.woff2') format('woff2-variations');
+}
+
 :root {
-  --bg: #171512;
-  --bg-2: #131110;
-  --panel: #201d19;
-  --panel-2: #262219;
-  --line: #332d25;
-  --line-soft: #241f19;
-  --ink: #efe7db;
-  --ink-dim: #b3a695;
-  --ink-mute: #8b8073;
-  --accent: #f0b45a;
-  --accent-ink: #241c0d;
-  --ok: #7fd1c0;
-  --warn: #e0a35b;
-  --bad: #e0705b;
-  --radius: 10px;
+  /* 나무 — 바깥 틀 */
+  --wood: #7b5230;
+  --wood-dark: #3d2716;
+  --wood-deep: #2a1a0e;
+
+  /* 종이 — 판때기 안쪽 */
+  --paper: #fbf0d5;
+  --paper-2: #f2e0b8;
+  --paper-3: #e6cf9d;
+  --paper-hi: #fffaec;
+
+  /* 글자 */
+  --ink: #43290f;
+  --ink-dim: #7a5836;
+  --ink-mute: #a3855f;
+
+  /* 강조 */
+  --accent: #f0a933;
+  --accent-dark: #b9761c;
+  --accent-ink: #43290f;
+  --leaf: #79b23f;
+  --leaf-dark: #4e7d24;
+  --ok: #4e9b6a;
+  --warn: #e08a2b;
+  --bad: #cf5340;
+  --bad-dark: #96341f;
+
+  --line: #b9975f;
+  --line-soft: #d8bd8a;
+
   --font: Pretendard, "Malgun Gothic", -apple-system, "Segoe UI", system-ui, sans-serif;
   --mono: "Cascadia Mono", Consolas, ui-monospace, monospace;
 
-  /* One shadow scale — bigger surfaces read as thicker, so they cast deeper. */
-  --shadow-1: 0 1px 2px #0000004d;
-  --shadow-2: 0 6px 18px -6px #00000073, 0 1px 0 #ffffff0a inset;
-  --shadow-3: 0 28px 60px -18px #000000b3, 0 2px 0 #ffffff12 inset;
+  /* 계단 모서리. 전부 직각이라 어느 배율에서도 또렷하다. */
+  --notch: polygon(
+    0 6px, 3px 6px, 3px 3px, 6px 3px, 6px 0,
+    calc(100% - 6px) 0, calc(100% - 6px) 3px, calc(100% - 3px) 3px, calc(100% - 3px) 6px, 100% 6px,
+    100% calc(100% - 6px), calc(100% - 3px) calc(100% - 6px), calc(100% - 3px) calc(100% - 3px),
+    calc(100% - 6px) calc(100% - 3px), calc(100% - 6px) 100%,
+    6px 100%, 6px calc(100% - 3px), 3px calc(100% - 3px), 3px calc(100% - 6px), 0 calc(100% - 6px)
+  );
+  /* 작은 것들(칩·버튼)은 한 단만 깎는다 */
+  --notch-sm: polygon(
+    0 3px, 3px 3px, 3px 0,
+    calc(100% - 3px) 0, calc(100% - 3px) 3px, 100% 3px,
+    100% calc(100% - 3px), calc(100% - 3px) calc(100% - 3px), calc(100% - 3px) 100%,
+    3px 100%, 3px calc(100% - 3px), 0 calc(100% - 3px)
+  );
 
-  /* Press feedback: short enough to read as "instant", not as an animation. */
-  --press: 100ms cubic-bezier(0.2, 0, 0, 1);
-  --calm: 260ms cubic-bezier(0.32, 0.72, 0, 1);
+  /* clip-path 를 쓰면 box-shadow 는 잘려 나간다 — 그림자는 filter 로 건다. */
+  --drop: drop-shadow(3px 3px 0 #2a1a0e59);
+  --drop-lg: drop-shadow(5px 5px 0 #2a1a0e73);
+
+  /* 프레임처럼 끊어지는 움직임 */
+  --press: 80ms steps(2, end);
+  --calm: 160ms steps(4, end);
 }
 
 * { box-sizing: border-box; }
@@ -42,114 +86,127 @@
 html, body { height: 100%; margin: 0; }
 
 body {
-  background: var(--bg);
+  /* 나무 바닥 — 하드 스톱이라 그라데이션이 아니라 널판이다 */
+  background:
+    repeating-linear-gradient(90deg,
+      #3d2716 0 44px, #402917 44px 45px, #3a2414 45px 89px, #402917 89px 90px);
   color: var(--ink);
   font: 14px/1.5 var(--font);
-  letter-spacing: 0; /* body sits at zero; only the extremes get tracking */
-  font-optical-sizing: auto;
+  letter-spacing: 0;
+  /* 글자는 글자로 — 픽셀 흉내를 내지 않는다 */
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
 }
 
 button, textarea, input, select { font: inherit; color: inherit; }
 
-/* Nothing on the input path should wait: no tap delay, no text-selection drag. */
 button, .plate, .job-card, .persona, .type-tabs button, .chip, .watch {
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
 
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 3px solid var(--accent);
   outline-offset: 2px;
-  border-radius: 6px;
 }
-/* The sheet takes focus when it opens so Esc works and screen readers land
- * inside it — but it is a container, not a control, so it shows no ring. */
 .sheet:focus, .sheet:focus-visible { outline: none; }
 
 .muted { color: var(--ink-mute); }
 
-/* ── shell ─────────────────────────────────────────────────────────────── */
-body:has(.update-bar:not([hidden])) .app { height: calc(100% - 38px); }
+/* 굵고 네모난 스크롤바 — 얇은 막대는 이 화면의 문법이 아니다 */
+* { scrollbar-width: auto; scrollbar-color: var(--wood) transparent; }
+::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar-track { background: #00000014; }
+::-webkit-scrollbar-thumb {
+  background: var(--wood);
+  border: 2px solid var(--wood-dark);
+}
+::-webkit-scrollbar-thumb:hover { background: #8e6039; }
+::-webkit-scrollbar-corner { background: transparent; }
 
-/* Floating chrome: a translucent layer over the room, not a painted strip. */
+/* ── shell ─────────────────────────────────────────────────────────────── */
+body:has(.update-bar:not([hidden])) .app { height: calc(100% - 40px); }
+
 .update-bar {
   display: flex; align-items: center; gap: 10px;
-  height: 38px; padding: 0 14px;
-  background: #2e271699;
-  backdrop-filter: blur(24px) saturate(180%);
-  border-bottom: 1px solid #ffffff14;
-  box-shadow: var(--shadow-1);
-  /* Vibrancy: over a translucent surface, flat grey text dissolves. */
-  font-size: 12px; font-weight: 500; letter-spacing: .005em;
-  color: #f7e9cd;
+  height: 40px; padding: 0 14px;
+  background: var(--accent);
+  border-bottom: 3px solid var(--wood-dark);
+  box-shadow: inset 0 3px 0 #ffd98a;
+  font-size: 12px; font-weight: 700; letter-spacing: .01em;
+  color: var(--accent-ink);
 }
 .update-bar[hidden] { display: none; }
 .update-bar span { flex: 1; }
 
-/* The two side columns are sized by variables rather than by the template, so
- * the breakpoints below and the drag handle can both move one without knowing
- * about the other. An inline --right-w set by the drag wins over every rule
- * here, which is exactly the precedence a manual override should have. */
 .app {
   --left-w: 260px;
   --right-w: 340px;
   display: grid;
   grid-template-columns: var(--left-w) minmax(0, 1fr) 6px var(--right-w);
   height: 100%;
-  gap: 1px;
-  background: var(--line);
+  gap: 3px;
+  background: var(--wood-deep);
 }
 
 .col {
-  background: var(--bg);
   min-width: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 
-/* Side columns are the structural material: heavier than the room they frame. */
+/* 옆 칸은 나무 판 — 판때기들이 그 위에 못 박혀 있는 것처럼 보이게 */
 .left, .right {
   padding: 12px; gap: 12px;
   overflow-y: auto;
-  background: linear-gradient(var(--bg-2), var(--bg) 220px);
-  scrollbar-width: thin;
-  scrollbar-color: #3a332b transparent;
+  /* 가로로 그은 널판 이음매 — 하드 스톱이라 그라데이션이 아니라 판자다 */
+  background:
+    repeating-linear-gradient(180deg,
+      #6d4728 0 30px, #5c3b20 30px 33px);
 }
 
 .brand { display: flex; align-items: center; gap: 10px; }
 .brand > div { flex: 1; min-width: 0; }
 .brand b {
   display: block;
-  font-size: 14px; font-weight: 650;
-  letter-spacing: -.01em; /* names tighten as they gain weight */
+  font-size: 15px; font-weight: 800;
+  letter-spacing: -.01em;
+  color: var(--paper-hi);
+  text-shadow: 2px 2px 0 var(--wood-deep);
 }
-.brand small { color: var(--ink-mute); font-size: 11px; letter-spacing: .02em; }
+.brand small {
+  color: #e3c795; font-size: 11px; font-weight: 600; letter-spacing: .02em;
+  text-shadow: 1px 1px 0 var(--wood-deep);
+}
 .logo {
-  width: 22px; height: 22px; border-radius: 6px; flex: none;
-  background: linear-gradient(135deg, var(--accent) 0 50%, #c8484f 50% 100%);
-  box-shadow: inset 0 0 0 2px #1b1814, var(--shadow-1);
+  width: 26px; height: 26px; flex: none;
+  clip-path: var(--notch-sm);
+  background:
+    linear-gradient(135deg, var(--leaf) 0 50%, var(--accent) 50% 100%);
+  box-shadow: inset 0 0 0 3px var(--wood-dark);
 }
 
+/* 판때기 — 이 화면의 기본 재질. 위/왼쪽 하이라이트 + 아래/오른쪽 그늘. */
 .panel {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
+  background: var(--paper);
   padding: 11px 12px;
   min-height: 0;
-  /* A hairline of light on the top edge — the same trick a real bevel plays. */
-  box-shadow: var(--shadow-2);
+  clip-path: var(--notch);
+  box-shadow:
+    inset 0 0 0 3px var(--wood-dark),
+    inset 3px 3px 0 3px var(--paper-hi),
+    inset -3px -3px 0 3px var(--paper-3);
+  filter: var(--drop);
 }
 .panel.grow { flex: 1; display: flex; flex-direction: column; }
 .panel h2 {
   margin: 0 0 8px;
   font-size: 11px;
-  letter-spacing: .09em; /* small text reads too tight — open it up */
+  letter-spacing: .09em;
   text-transform: uppercase;
-  color: var(--ink-mute);
-  font-weight: 600;
+  color: var(--wood);
+  font-weight: 800;
 }
 
 /* ── stage ─────────────────────────────────────────────────────────────── */
@@ -161,34 +218,55 @@ body:has(.update-bar:not([hidden])) .app { height: calc(100% - 38px); }
   display: grid;
   place-items: center;
   overflow: hidden;
-  /* Depth without a border: the room sits in a pool of light. */
-  background: radial-gradient(120% 90% at 50% 38%, #1d1a15 0%, var(--bg) 62%);
+  background:
+    repeating-conic-gradient(#5c3d22 0 25%, #573a20 0 50%) 0 0 / 16px 16px;
 }
 .viewport { position: relative; line-height: 0; }
 #office {
   display: block;
-  image-rendering: pixelated;
-  border-radius: 4px;
-  box-shadow: 0 24px 48px -24px #000000cc;
+  image-rendering: pixelated; /* 그림만 픽셀 — 글자는 위에 DOM 으로 얹힌다 */
 }
-#nameplates { position: absolute; inset: 0; pointer-events: none; line-height: 1.25; }
+/* 방을 두른 나무 틀.
+ *
+ * 밖이 아니라 *안쪽*으로 그린다. 방은 가운데 칸을 거의 꽉 채우도록 배율을
+ * 고르기 때문에(office.js `_resizeToFit`) 바깥으로 그린 테두리는 남는 자리가
+ * 1px 뿐이라 통째로 잘려 나간다 — 실제로 재서 확인했다. 안쪽으로 그리면
+ * 방 그림의 가장자리 10px 을 덮는 대신 어느 크기에서도 잘리지 않는다. */
+.viewport::before {
+  content: '';
+  position: absolute; inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  box-shadow:
+    inset 0 0 0 4px var(--wood-dark),
+    inset 0 0 0 7px var(--wood),
+    inset 0 0 0 11px var(--wood-deep);
+}
+#nameplates { position: absolute; inset: 0; pointer-events: none; line-height: 1.25; z-index: 2; }
 
-/* The hint is chrome floating under the room, so it is a material too. */
+/* 화면 아래 안내 — 게임 하단 배너 */
 .hint {
-  margin: 6px auto 14px;
-  padding: 5px 12px;
-  border-radius: 999px;
-  background: #ffffff08;
-  backdrop-filter: blur(12px);
-  border: 1px solid #ffffff0f;
-  color: var(--ink-mute);
-  font-size: 12px; letter-spacing: .005em;
+  margin: 12px auto 16px;
+  padding: 5px 14px;
+  clip-path: var(--notch-sm);
+  background: var(--paper-2);
+  box-shadow: inset 0 0 0 3px var(--wood-dark);
+  color: var(--ink-dim);
+  font-size: 12px; font-weight: 600;
+  filter: var(--drop);
   transition: color var(--calm), background var(--calm);
 }
 
-/* Drop target: the room lights up, no dashed cut-out. */
-.stage.drop-target { background: radial-gradient(120% 90% at 50% 38%, #262013 0%, var(--bg) 66%); }
-.stage.drop-target #office { box-shadow: 0 0 0 2px #f0b45a55, 0 24px 48px -24px #000000cc; }
+/* 카드를 방 위로 가져오면 틀에 불이 들어온다 */
+.stage.drop-target {
+  background: repeating-conic-gradient(#6f4a26 0 25%, #684523 0 50%) 0 0 / 16px 16px;
+}
+.stage.drop-target .viewport::before {
+  box-shadow:
+    inset 0 0 0 4px var(--accent),
+    inset 0 0 0 7px var(--accent-dark),
+    inset 0 0 0 11px var(--wood-deep);
+}
 
 /* ── nameplates ────────────────────────────────────────────────────────── */
 .plate {
@@ -204,84 +282,69 @@ body:has(.update-bar:not([hidden])) .app { height: calc(100% - 38px); }
 }
 .plate b {
   display: inline-block;
-  font-size: 12px; font-weight: 600; letter-spacing: .005em;
-  padding: 1px 7px;
-  border-radius: 999px;
-  background: #16130fcc;
-  backdrop-filter: blur(8px);
-  border: 1px solid var(--line);
+  font-size: 12px; font-weight: 700; letter-spacing: .005em;
+  padding: 1px 8px;
+  clip-path: var(--notch-sm);
+  background: var(--paper);
+  box-shadow: inset 0 0 0 2px var(--wood-dark);
   color: var(--ink);
-  box-shadow: var(--shadow-1);
-  transition: border-color var(--calm), color var(--calm), transform var(--press);
+  filter: drop-shadow(2px 2px 0 #2a1a0e73);
+  transition: background var(--calm), color var(--calm), transform var(--press);
 }
-.plate:hover b { border-color: #4d4437; }
-.plate:active b { transform: scale(0.94); } /* feedback on the press, not the release */
-/* Caption and chips float over the room's pixel art, so they get their own
- * material and a vibrancy bump — flat grey text on a patterned wall is
- * unreadable, and no amount of colour on the translucent layer fixes it. */
+.plate:hover b { background: var(--paper-hi); }
+.plate:active b { transform: translate(1px, 1px); } /* 눌리면 눌린 자리로 */
 .plate .cap,
 .plate .chips {
-  /* fit-content + auto margins: the backing hugs the text but each still owns
-   * its own line under the name. */
   display: block;
   width: fit-content;
   max-width: 100%;
-  margin: 2px auto 0;
-  padding: 0 5px;
-  border-radius: 999px;
-  background: #16130fbf;
-  backdrop-filter: blur(6px);
+  margin: 3px auto 0;
+  padding: 0 6px;
+  clip-path: var(--notch-sm);
+  background: var(--paper-2);
+  box-shadow: inset 0 0 0 2px var(--wood-dark);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   vertical-align: top;
 }
 .plate .cap {
-  font-size: 11px; font-weight: 500; letter-spacing: .015em;
-  color: #ded2c0; /* one step brighter than --ink-dim: it is over content */
+  font-size: 11px; font-weight: 600; letter-spacing: .015em;
+  color: var(--ink-dim);
 }
 .plate .cap:empty, .plate .chips:empty { display: none; }
-.plate .cap.job { color: var(--accent); font-weight: 600; }
+.plate .cap.job { background: var(--accent); color: var(--accent-ink); font-weight: 700; }
 .plate .chips {
-  font-size: 10px; font-weight: 500; letter-spacing: .025em;
-  color: #a99d8c;
+  font-size: 10px; font-weight: 600; letter-spacing: .025em;
+  color: var(--wood);
 }
-.plate[data-state="working"] b { border-color: #2e5f57; }
-.plate[data-state="awaiting_approval"] b { border-color: var(--bad); color: #ffd9d2; }
+.plate[data-state="working"] b { background: var(--leaf); color: #10240a; }
+.plate[data-state="awaiting_approval"] b { background: var(--bad); color: #fff0ec; }
 .plate[data-state="exited"] { opacity: .55; }
-.plate.sel b { border-color: var(--accent); color: #fff2dc; }
-/* The card is over this person — say so on the person, not just the room. */
+.plate.sel b { box-shadow: inset 0 0 0 2px var(--wood-dark), inset 0 0 0 5px var(--accent); }
 .plate.drop b {
-  border-color: var(--accent);
-  background: #3a2c14ee;
-  color: #fff2dc;
-  transform: scale(1.06);
+  background: var(--accent);
+  color: var(--accent-ink);
+  transform: scale(1.08);
 }
 
 /* ── zone signs ────────────────────────────────────────────────────────── */
-/* Two signs on the back wall. They never move and never update, so they carry
- * the room's structure without competing with anything in it — but they hang
- * over pixel art whose colour is not ours to choose, so they get the same dark
- * chip every other overlay label uses rather than trusting the wall behind. */
+/* 벽에 걸린 나무 팻말 두 개. 움직이지도 바뀌지도 않는다. */
 .zlabel {
   position: absolute;
   top: 0; left: 0;
-  padding: 1px 8px;
-  border-radius: 999px;
-  background: #16130fd9;
-  backdrop-filter: blur(8px);
-  border: 1px solid var(--line-soft);
-  font-size: 10px; font-weight: 600;
+  padding: 2px 9px;
+  clip-path: var(--notch-sm);
+  background: var(--wood);
+  box-shadow: inset 0 0 0 2px var(--wood-deep), inset 0 2px 0 2px #a3714a;
+  font-size: 10px; font-weight: 800;
   letter-spacing: .1em;
-  color: #a99d8c;
+  color: var(--paper-hi);
   white-space: nowrap;
   pointer-events: none;
 }
 
 /* ── window people + group tables ──────────────────────────────────────── */
-/* These labels are dense — a dozen of them ring one table — so they carry less
- * weight than a crew nameplate and truncate hard. Hovering is what expands one
- * to its full title; the rest stay out of the way. */
 .wplate {
   position: absolute;
   top: 0; left: 0;
@@ -293,114 +356,115 @@ body:has(.update-bar:not([hidden])) .app { height: calc(100% - 38px); }
 }
 .wplate b {
   display: block;
-  font-size: 10px; font-weight: 500; letter-spacing: .01em;
+  font-size: 10px; font-weight: 600; letter-spacing: .01em;
   padding: 0 5px;
-  border-radius: 999px;
-  background: #16130fcc;
-  backdrop-filter: blur(6px);
-  border: 1px solid var(--line-soft);
-  color: #cdc2b1;
+  clip-path: var(--notch-sm);
+  background: var(--paper-2);
+  box-shadow: inset 0 0 0 2px var(--wood-dark);
+  color: var(--ink-dim);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  transition: border-color var(--calm), color var(--calm), transform var(--press);
+  transition: background var(--calm), color var(--calm), transform var(--press);
 }
 .wplate:hover { max-width: 230px; z-index: 6; }
-.wplate:hover b { border-color: #4d4437; color: var(--ink); }
-.wplate:active b { transform: scale(0.94); }
-/* Minimized: still yours, just not on screen. */
+.wplate:hover b { background: var(--paper-hi); color: var(--ink); }
+.wplate:active b { transform: translate(1px, 1px); }
 .wplate.dim { opacity: .45; }
-.wplate.active b { border-color: #6b5a3c; color: #f6ecd6; }
+.wplate.active b { background: var(--accent); color: var(--accent-ink); }
 
 .gplate {
   position: absolute;
   top: 0; left: 0;
   display: flex; align-items: center; gap: 6px;
-  padding: 2px 3px 2px 8px;
-  border-radius: 999px;
-  background: #16130fe6;
-  backdrop-filter: blur(10px);
-  border: 1px solid var(--line);
-  box-shadow: var(--shadow-1);
+  padding: 2px 3px 2px 9px;
+  clip-path: var(--notch-sm);
+  background: var(--paper);
+  box-shadow: inset 0 0 0 3px var(--wood-dark);
   white-space: nowrap;
   pointer-events: auto;
   z-index: 4;
-  transition: border-color var(--calm), background var(--calm), transform var(--press);
+  filter: drop-shadow(2px 2px 0 #2a1a0e73);
+  transition: background var(--calm), transform var(--press);
 }
 .gplate b {
-  font-size: 11px; font-weight: 600; letter-spacing: .005em;
+  font-size: 11px; font-weight: 700;
   color: var(--ink);
   cursor: text;
 }
-.gplate b:hover { color: var(--accent); }
-.gplate button { padding: 1px 8px; font-size: 10px; letter-spacing: .01em; box-shadow: none; }
-.gplate.drop { border-color: var(--accent); background: #3a2c14f2; transform: scale(1.05); }
+.gplate b:hover { color: var(--accent-dark); }
+.gplate button { padding: 1px 8px; font-size: 10px; filter: none; }
+.gplate.drop { background: var(--accent); transform: scale(1.06); }
 
 /* ── usage + system ────────────────────────────────────────────────────── */
 .usage .lim { margin-bottom: 9px; }
 .usage .lim:last-child { margin-bottom: 0; }
 .usage .top {
   display: flex; justify-content: space-between; gap: 8px;
-  font-size: 12px; margin-bottom: 3px;
+  font-size: 12px; font-weight: 600; margin-bottom: 4px;
 }
 .usage .top span:last-child { color: var(--ink-dim); font-variant-numeric: tabular-nums; }
-.bar { height: 5px; border-radius: 3px; background: #2c261f; overflow: hidden; box-shadow: inset 0 1px 1px #0006; }
+/* 체력바 */
+.bar {
+  height: 10px;
+  background: var(--paper-3);
+  box-shadow: inset 0 0 0 2px var(--wood-dark);
+  overflow: hidden;
+}
 .bar > i {
   display: block; height: 100%;
-  background: var(--ok);
-  border-radius: 3px;
-  transition: width 600ms cubic-bezier(0.32, 0.72, 0, 1), background var(--calm);
+  background: var(--leaf);
+  box-shadow: inset 0 2px 0 #a8d472;
+  transition: width 400ms steps(8, end), background var(--calm);
 }
-.bar.warn > i { background: var(--warn); }
-.bar.bad > i { background: var(--bad); }
-.usage .resets { font-size: 11px; letter-spacing: .01em; color: var(--ink-mute); margin-top: 2px; }
+.bar.warn > i { background: var(--warn); box-shadow: inset 0 2px 0 #f6c27a; }
+.bar.bad > i { background: var(--bad); box-shadow: inset 0 2px 0 #e89383; }
+.usage .resets { font-size: 11px; letter-spacing: .01em; color: var(--ink-mute); margin-top: 3px; }
 
-.hint-sm { margin: -3px 0 8px; font-size: 11px; line-height: 1.45; letter-spacing: .01em; color: var(--ink-mute); }
+.hint-sm { margin: -3px 0 8px; font-size: 11px; line-height: 1.45; color: var(--ink-mute); }
 
 /* ── today's tasks + timer ─────────────────────────────────────────────── */
 .tasks { display: grid; gap: 5px; }
 .tasks .task {
   display: flex; justify-content: space-between; gap: 8px;
   font-size: 12px; color: var(--ink-dim);
-}
-.tasks .task {
   cursor: grab;
   user-select: none;
-  touch-action: none; /* the row owns the gesture — see startCardDrag() */
-  padding: 1px 3px;
-  margin: 0 -3px;
-  border-radius: 6px;
+  touch-action: none;
+  padding: 2px 4px;
+  margin: 0 -4px;
+  clip-path: var(--notch-sm);
   transition: background var(--calm), transform var(--press);
 }
-.tasks .task:hover { background: #ffffff08; }
-.tasks .task:active { cursor: grabbing; transform: scale(0.985); }
+.tasks .task:hover { background: var(--paper-2); }
+.tasks .task:active { cursor: grabbing; transform: translate(1px, 1px); }
 .tasks .task.lifted { opacity: .3; transform: none; }
-.tasks .task b { font-weight: 500; color: var(--ink); }
+.tasks .task b { font-weight: 700; color: var(--ink); }
 .tasks .task span { font-variant-numeric: tabular-nums; flex: none; }
-.tasks .task.running b { color: var(--accent); }
+.tasks .task.running b { color: var(--accent-dark); }
 .tasks .running-note {
-  margin-top: 4px; padding-top: 6px; border-top: 1px solid var(--line);
-  font-size: 12px; color: var(--accent); font-variant-numeric: tabular-nums;
+  margin-top: 5px; padding-top: 6px; border-top: 2px solid var(--line-soft);
+  font-size: 12px; font-weight: 700; color: var(--accent-dark);
+  font-variant-numeric: tabular-nums;
 }
 
 /* ── job cards ─────────────────────────────────────────────────────────── */
-.jobs { display: grid; gap: 6px; }
+.jobs { display: grid; gap: 7px; }
 .job-card {
-  border: 1px solid var(--line);
-  background: var(--panel-2);
-  border-radius: 8px;
-  padding: 7px 9px;
+  background: var(--paper-2);
+  clip-path: var(--notch-sm);
+  box-shadow: inset 0 0 0 3px var(--wood-dark), inset 0 3px 0 3px var(--paper-hi);
+  padding: 8px 10px;
   cursor: grab;
   user-select: none;
-  touch-action: none; /* the card owns the gesture — see startJobDrag() */
-  transition: border-color var(--calm), transform var(--press), opacity var(--calm);
+  touch-action: none;
+  filter: drop-shadow(2px 2px 0 #2a1a0e40);
+  transition: background var(--calm), transform var(--press), opacity var(--calm);
 }
-.job-card:hover { border-color: #4d4437; }
-.job-card:active { cursor: grabbing; transform: scale(0.97); }
-.job-card b { display: block; font-size: 12px; font-weight: 600; letter-spacing: .005em; }
-.job-card small { color: var(--ink-mute); font-size: 11px; letter-spacing: .01em; }
-/* While its ghost is in the air the original stays put, dimmed — the card left
- * this spot and can come back to it. */
+.job-card:hover { background: var(--paper-hi); }
+.job-card:active { cursor: grabbing; transform: translate(2px, 2px); filter: none; }
+.job-card b { display: block; font-size: 12px; font-weight: 700; }
+.job-card small { color: var(--ink-mute); font-size: 11px; }
 .job-card.lifted { opacity: .3; transform: none; }
 
 #drag-layer {
@@ -410,20 +474,19 @@ body:has(.update-bar:not([hidden])) .app { height: calc(100% - 38px); }
 }
 .job-ghost {
   position: absolute; top: 0; left: 0;
-  border: 1px solid #6b5a3c;
-  background: #2c2619f2;
-  backdrop-filter: blur(10px);
-  border-radius: 10px;
-  padding: 7px 9px;
+  background: var(--paper);
+  clip-path: var(--notch-sm);
+  box-shadow: inset 0 0 0 3px var(--accent-dark);
+  padding: 8px 10px;
   width: max-content; max-width: 240px;
-  box-shadow: var(--shadow-3);
+  filter: var(--drop-lg);
   will-change: transform;
 }
-.job-ghost b { display: block; font-size: 12px; font-weight: 600; color: var(--ink); }
+.job-ghost b { display: block; font-size: 12px; font-weight: 700; color: var(--ink); }
 .job-ghost small { color: var(--ink-mute); font-size: 11px; }
 
 .system { display: grid; gap: 7px; }
-.system .row { display: flex; justify-content: space-between; font-size: 12px; }
+.system .row { display: flex; justify-content: space-between; font-size: 12px; font-weight: 600; }
 .system .row span:last-child { color: var(--ink-dim); font-variant-numeric: tabular-nums; }
 
 /* ── activity ──────────────────────────────────────────────────────────── */
@@ -431,20 +494,16 @@ body:has(.update-bar:not([hidden])) .app { height: calc(100% - 38px); }
   list-style: none; margin: 0; padding: 0;
   overflow-y: auto; flex: 1;
   font-size: 12px;
-  /* Fade where the log runs under the panel edge instead of ruling a line. */
-  mask-image: linear-gradient(#000 calc(100% - 18px), transparent);
-  scrollbar-width: thin;
-  scrollbar-color: #3a332b transparent;
 }
 .activity li {
-  padding: 3px 0;
-  border-bottom: 1px solid var(--line-soft);
+  padding: 4px 0;
+  border-bottom: 2px dotted var(--line-soft);
   color: var(--ink-dim);
   display: flex; gap: 7px;
 }
 .activity time { color: var(--ink-mute); font-variant-numeric: tabular-nums; flex: none; }
-.activity li[data-kind="error"] { color: #f0a79a; }
-.activity li[data-kind="spawn"] { color: var(--ok); }
+.activity li[data-kind="error"] { color: var(--bad-dark); font-weight: 600; }
+.activity li[data-kind="spawn"] { color: var(--leaf-dark); font-weight: 600; }
 
 /* ── chat ──────────────────────────────────────────────────────────────── */
 .chat-panel { display: flex; flex-direction: column; gap: 10px; }
@@ -453,80 +512,76 @@ body:has(.update-bar:not([hidden])) .app { height: calc(100% - 38px); }
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 9px;
   padding-right: 3px;
   min-height: 0;
-  mask-image: linear-gradient(transparent, #000 14px);
-  scrollbar-width: thin;
-  scrollbar-color: #3a332b transparent;
 }
 .chat .empty { margin: auto; }
+
+/* 대화 상자 — 게임 대사창. 말꼬리 대신 모서리 한 곳만 각지게 남긴다. */
 .msg {
-  padding: 7px 10px;
-  border-radius: 12px;
+  padding: 8px 11px;
   max-width: 92%;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font-size: 13px; line-height: 1.55; /* looser leading for prose than for the dense UI */
-  box-shadow: var(--shadow-1);
+  font-size: 13px; line-height: 1.6;
+  clip-path: var(--notch-sm);
 }
-.msg.user { align-self: flex-end; background: #33301f; color: #f6ecd6; border-bottom-right-radius: 4px; }
+.msg.user {
+  align-self: flex-end;
+  background: var(--leaf);
+  color: #11250b;
+  box-shadow: inset 0 0 0 3px var(--leaf-dark), inset 0 3px 0 3px #a3d072;
+}
 .msg.assistant {
   align-self: flex-start;
-  background: var(--panel-2);
-  border: 1px solid var(--line);
-  border-bottom-left-radius: 4px;
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: inset 0 0 0 3px var(--wood-dark), inset 0 3px 0 3px var(--paper-hi);
 }
-.msg.assistant.streaming { border-style: dashed; }
+.msg.assistant.streaming { box-shadow: inset 0 0 0 3px var(--line); }
 .msg.tool {
   align-self: flex-start;
-  background: none; border: none; box-shadow: none;
-  color: var(--ink-mute); font-size: 11px; letter-spacing: .01em; padding: 0 2px;
+  background: none; box-shadow: none; clip-path: none;
+  color: var(--ink-mute); font-size: 11px; padding: 0 2px;
 }
-/* A new message arrives from where it belongs — the user's from the right, the
- * assistant's from the left — and never re-animates on a re-render. */
-.msg.in { animation: msg-in 280ms cubic-bezier(0.32, 0.72, 0, 1) both; }
+/* 등장은 프레임 단위로 — 부드럽게 미끄러지지 않는다 */
+.msg.in { animation: msg-in 160ms steps(3, end) both; }
 .msg.user.in { animation-name: msg-in-right; }
-@keyframes msg-in { from { opacity: 0; transform: translate(-6px, 6px) scale(.98); } }
-@keyframes msg-in-right { from { opacity: 0; transform: translate(6px, 6px) scale(.98); } }
+@keyframes msg-in { from { opacity: 0; transform: translate(-8px, 4px); } }
+@keyframes msg-in-right { from { opacity: 0; transform: translate(8px, 4px); } }
 
 /* ── the width handle ─────────────────────────────────────────────────────
- * A 6px column between the room and the conversation. At rest it is just the
- * seam the grid already draws; the grip only appears under the pointer, so the
- * control is discoverable without being a permanent piece of furniture. */
+ * 방과 대화창 사이의 6px 기둥. 평소엔 나무 이음매고, 손을 대면 손잡이가 나온다. */
 .resizer {
   position: relative;
   cursor: col-resize;
-  background: transparent;
+  background: var(--wood);
   transition: background var(--calm);
-  /* Dragging must not select the text on either side of it. */
   user-select: none;
   touch-action: none;
 }
 .resizer::before {
   content: '';
   position: absolute;
-  top: 50%; left: 50%;
-  width: 2px; height: 26px;
-  transform: translate(-50%, -50%) scaleY(.4);
-  border-radius: 2px;
-  background: var(--ink-mute);
+  top: 50%; left: 0;
+  width: 6px; height: 8px;
+  transform: translateY(-50%);
+  background: var(--paper-3);
+  box-shadow: 0 -10px 0 var(--paper-3), 0 10px 0 var(--paper-3);
   opacity: 0;
-  transition: opacity var(--calm), transform var(--calm);
+  transition: opacity var(--calm);
 }
 .resizer:hover::before,
 .resizer:focus-visible::before,
-.resizer.dragging::before { opacity: .75; transform: translate(-50%, -50%) scaleY(1); }
-.resizer:hover, .resizer.dragging { background: #ffffff0a; }
-.resizer.dragging::before { background: var(--accent); opacity: 1; }
-/* While a drag is live the whole window keeps the resize cursor, even where the
- * pointer has run off the handle. */
+.resizer.dragging::before { opacity: 1; }
+.resizer:hover, .resizer.dragging { background: #8e6039; }
+.resizer.dragging::before { background: var(--accent); box-shadow: 0 -10px 0 var(--accent), 0 10px 0 var(--accent); }
 body.resizing { cursor: col-resize; user-select: none; }
 
 /* ── markdown in the conversation ─────────────────────────────────────────
- * An answer is prose, so it gets prose spacing: the first and last blocks sit
- * flush with the bubble, and everything between breathes. Sizes are relative to
- * the bubble's own 13px so the whole thing scales as one. */
+ * 답변은 글이다 — 여기서만은 여백을 넉넉히 준다. 글자 크기는 말풍선의 13px 기준
+ * 상대값이라 대화창을 넓혀도 한 덩어리로 커진다. */
 .msg.assistant > :first-child { margin-top: 0; }
 .msg.assistant > :last-child { margin-bottom: 0; }
 .msg.assistant p, .work-note p { margin: 0 0 .6em; }
@@ -534,10 +589,10 @@ body.resizing { cursor: col-resize; user-select: none; }
 .msg.assistant h4, .msg.assistant h5, .msg.assistant h6,
 .work-note h1, .work-note h2, .work-note h3 {
   margin: 1em 0 .45em;
-  font-weight: 650;
+  font-weight: 800;
   letter-spacing: -.01em;
   line-height: 1.35;
-  color: var(--ink);
+  color: var(--wood-dark);
 }
 .msg.assistant h1 { font-size: 1.32em; }
 .msg.assistant h2 { font-size: 1.18em; }
@@ -548,129 +603,128 @@ body.resizing { cursor: col-resize; user-select: none; }
   padding-left: 1.35em;
 }
 .msg.assistant li, .work-note li { margin: .16em 0; }
-.msg.assistant li::marker { color: var(--ink-mute); }
-.msg.assistant strong { font-weight: 650; color: #fbf3e4; }
+.msg.assistant li::marker { color: var(--accent-dark); }
+.msg.assistant strong { font-weight: 800; color: var(--wood-dark); }
 .msg.assistant em { font-style: italic; }
 .msg.assistant s { color: var(--ink-mute); }
 .msg.assistant hr {
   margin: .9em 0;
-  border: 0; border-top: 1px solid var(--line);
+  border: 0; border-top: 3px dotted var(--line);
 }
 .msg.assistant blockquote, .work-note blockquote {
   margin: 0 0 .6em;
   padding: 0 0 0 .8em;
-  border-left: 2px solid var(--line);
+  border-left: 4px solid var(--accent);
   color: var(--ink-dim);
 }
 
-/* Code keeps its own material — a panel inside a panel — and never widens the
- * bubble: a long line scrolls itself rather than pushing the column out. */
 .msg.assistant code, .work-note code {
   font: .88em/1.5 var(--mono);
-  background: #ffffff0d;
-  border-radius: 5px;
-  padding: .1em .35em;
+  background: var(--paper-3);
+  box-shadow: inset 0 0 0 2px #d3b276;
+  padding: .05em .35em;
 }
 .msg.assistant pre, .work-note pre {
   margin: 0 0 .6em;
-  padding: 8px 10px;
-  background: #12100dcc;
-  border: 1px solid var(--line-soft);
-  border-radius: 8px;
+  padding: 9px 11px;
+  background: var(--wood-dark);
+  color: var(--paper-2);
+  box-shadow: inset 0 0 0 3px var(--wood-deep);
   overflow-x: auto;
-  scrollbar-width: thin;
-  scrollbar-color: #3a332b transparent;
 }
 .msg.assistant pre code, .work-note pre code {
-  background: none; padding: 0;
+  background: none; padding: 0; box-shadow: none;
+  color: var(--paper-2);
   font-size: .86em;
   white-space: pre;
 }
 
-.md-table { overflow-x: auto; margin: 0 0 .6em; scrollbar-width: thin; }
+.md-table { overflow-x: auto; margin: 0 0 .6em; }
 .msg.assistant table {
   border-collapse: collapse;
   font-size: .94em;
   min-width: 100%;
 }
 .msg.assistant th, .msg.assistant td {
-  padding: 4px 9px;
-  border: 1px solid var(--line);
+  padding: 5px 10px;
+  border: 2px solid var(--wood-dark);
   text-align: left;
   white-space: nowrap;
 }
 .msg.assistant th {
-  background: #ffffff08;
-  font-weight: 600;
-  color: var(--ink-dim);
+  background: var(--accent);
+  font-weight: 800;
+  color: var(--accent-ink);
 }
+.msg.assistant tbody tr:nth-child(even) td { background: var(--paper-2); }
 
-/* A cited source reads as a word, not as an address. */
+/* 출처는 주소가 아니라 이름으로 읽힌다 */
 .msg.assistant a, .work-note a {
-  color: var(--accent);
+  color: var(--accent-dark);
+  font-weight: 700;
   text-decoration: none;
-  border-bottom: 1px solid #f0b45a4d;
-  transition: border-color var(--calm), color var(--calm);
+  border-bottom: 2px solid var(--accent);
+  transition: background var(--calm), color var(--calm);
 }
-.msg.assistant a:hover, .work-note a:hover { border-bottom-color: var(--accent); }
+.msg.assistant a:hover, .work-note a:hover { background: var(--accent); color: var(--accent-ink); }
 
 /* ── the work tray ────────────────────────────────────────────────────────
- * Everything a person does before answering, gathered into one temporary block
- * at the foot of the conversation. It is deliberately quieter than a message:
- * no bubble, no shadow, dimmer ink — it is not part of the record, and it
- * disappears the moment the answer takes its place. */
+ * 답하기 전까지 하는 일 전부를 담은 임시 칸. 대화 기록이 아니라서 말풍선보다
+ * 조용하고, 답이 오면 통째로 사라진다. */
 .work {
   align-self: stretch;
   display: grid;
-  gap: 6px;
-  padding: 8px 10px;
-  border-radius: 12px;
-  border: 1px solid var(--line-soft);
-  background: #ffffff05;
+  gap: 7px;
+  padding: 9px 11px;
+  clip-path: var(--notch-sm);
+  background: var(--paper-2);
+  box-shadow: inset 0 0 0 3px var(--line);
 }
-.work.in { animation: msg-in 280ms cubic-bezier(0.32, 0.72, 0, 1) both; }
+.work.in { animation: msg-in 160ms steps(3, end) both; }
 .work-head {
-  display: flex; align-items: center; gap: 7px;
+  display: flex; align-items: center; gap: 8px;
   font-size: 12px; color: var(--ink-dim);
 }
-/* The pulse is the only thing on screen that says "still going" while the model
- * is silent, so it breathes rather than blinks. */
+/* 아직 하고 있다는 유일한 신호 — 네모난 점이 프레임 단위로 깜빡인다 */
 .work-dot {
-  width: 6px; height: 6px; border-radius: 50%;
-  background: var(--accent); flex: none;
-  animation: work-pulse 1400ms ease-in-out infinite;
+  width: 8px; height: 8px;
+  background: var(--accent);
+  box-shadow: inset 0 0 0 2px var(--accent-dark);
+  flex: none;
+  animation: work-pulse 800ms steps(2, end) infinite;
 }
 @keyframes work-pulse {
-  0%, 100% { opacity: .35; transform: scale(.8); }
-  50%      { opacity: 1;   transform: scale(1); }
+  0%, 100% { opacity: .3; }
+  50%      { opacity: 1; }
 }
-.work-what { font-weight: 600; }
+.work-what { font-weight: 700; color: var(--ink); }
 .work-elapsed { margin-left: auto; color: var(--ink-mute); font-size: 11px; font-variant-numeric: tabular-nums; }
 
 .work-tools { font-size: 11px; color: var(--ink-mute); }
 .work-tools > summary {
   cursor: pointer; list-style: none;
   padding: 3px 0;
-  color: var(--ink-mute);
+  color: var(--wood);
+  font-weight: 600;
   transition: color var(--calm);
 }
 .work-tools > summary::-webkit-details-marker { display: none; }
 .work-tools > summary::before {
-  content: '›';
-  display: inline-block; width: 11px;
-  transform: rotate(0deg);
+  content: '▶';
+  display: inline-block; width: 13px;
+  font-size: 8px;
   transition: transform var(--calm);
 }
 .work-tools[open] > summary::before { transform: rotate(90deg); }
-.work-tools > summary:hover { color: var(--ink-dim); }
+.work-tools > summary:hover { color: var(--accent-dark); }
 .work-tool {
-  padding: 2px 0 2px 11px;
+  padding: 2px 0 2px 13px;
   font-family: var(--mono); font-size: 10.5px;
   color: var(--ink-mute); opacity: .6;
   overflow-wrap: anywhere;
 }
 .work-tool.done { opacity: 1; }
-.work-tool.bad { color: var(--bad); }
+.work-tool.bad { color: var(--bad-dark); }
 
 .work-note {
   font-size: 12.5px; line-height: 1.55;
@@ -679,211 +733,254 @@ body.resizing { cursor: col-resize; user-select: none; }
 }
 .work-note.streaming::after {
   content: '';
-  display: inline-block; width: 6px; height: 12px;
+  display: inline-block; width: 7px; height: 13px;
   margin-left: 2px; vertical-align: -2px;
-  background: var(--ink-mute);
-  animation: work-caret 1000ms steps(1) infinite;
+  background: var(--accent-dark);
+  animation: work-caret 800ms steps(1) infinite;
 }
 @keyframes work-caret { 50% { opacity: 0; } }
 
-.composer { display: grid; gap: 7px; }
-/* `display: grid` outranks the UA's [hidden] rule, so without this the composer
- * stays on screen when nobody is selected — asking you to send a message to
- * no one, next to a 퇴근시키기 button for nobody. */
+.composer { display: grid; gap: 8px; }
 .composer[hidden] { display: none; }
-.composer .row { display: flex; gap: 7px; align-items: stretch; }
+.composer .row { display: flex; gap: 8px; align-items: stretch; }
 .composer .row.end { justify-content: flex-end; }
 .composer textarea {
   flex: 1;
   resize: none;
-  background: var(--panel-2);
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  padding: 7px 9px;
+  background: var(--paper-hi);
+  border: none;
+  clip-path: var(--notch-sm);
+  box-shadow: inset 0 0 0 3px var(--wood-dark);
+  padding: 8px 10px;
   outline: none;
   line-height: 1.5;
-  transition: border-color var(--calm), box-shadow var(--calm);
+  color: var(--ink);
+  transition: box-shadow var(--calm);
 }
-.composer textarea:focus { border-color: #6b5a3c; box-shadow: 0 0 0 3px #f0b45a1f; }
+.composer textarea::placeholder { color: var(--ink-mute); }
+.composer textarea:focus { box-shadow: inset 0 0 0 3px var(--accent-dark), inset 0 0 0 6px var(--accent); }
 
+/* 버튼 — 위는 밝고 아래는 그늘진 나무 조각. 누르면 그림자만큼 내려앉는다. */
 button {
   background: var(--accent);
   color: var(--accent-ink);
   border: none;
-  border-radius: 8px;
-  padding: 7px 13px;
-  font-weight: 600;
+  clip-path: var(--notch-sm);
+  padding: 8px 14px;
+  font-weight: 800;
   letter-spacing: .005em;
   cursor: pointer;
-  box-shadow: var(--shadow-1);
-  transition: transform var(--press), filter var(--press), border-color var(--calm), color var(--calm);
+  box-shadow: inset 0 0 0 3px var(--wood-dark), inset 0 3px 0 3px #ffd07a;
+  filter: drop-shadow(2px 2px 0 #2a1a0e59);
+  transition: transform var(--press), background var(--press), filter var(--press);
 }
-button:hover { filter: brightness(1.07); }
-button:active { transform: scale(0.96); } /* the instant it goes down */
-button:disabled { opacity: .5; cursor: default; filter: none; transform: none; }
+button:hover { background: #ffbe4d; }
+button:active {
+  transform: translate(2px, 2px);
+  filter: none;
+  box-shadow: inset 0 0 0 3px var(--wood-dark), inset 0 -3px 0 3px var(--accent-dark);
+}
+button:disabled { opacity: .45; cursor: default; transform: none; filter: none; }
 button.ghost {
-  background: none;
-  color: var(--ink-mute);
-  border: 1px solid var(--line);
-  font-weight: 500;
-  box-shadow: none;
+  background: var(--paper-2);
+  color: var(--ink-dim);
+  font-weight: 700;
+  box-shadow: inset 0 0 0 3px var(--wood-dark), inset 0 3px 0 3px var(--paper-hi);
 }
-button.ghost:hover { color: var(--ink); border-color: #4d4437; }
+button.ghost:hover { background: var(--paper-hi); color: var(--ink); }
+button.ghost:active { box-shadow: inset 0 0 0 3px var(--wood-dark), inset 0 -3px 0 3px var(--paper-3); }
 
+/* 체크박스 — 네모 칸에 도장 찍듯 */
 .watch {
-  display: flex; align-items: center; gap: 7px;
-  font-size: 12px; color: var(--ink-dim);
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; font-weight: 600; color: var(--ink-dim);
   cursor: pointer;
 }
-.watch input { accent-color: var(--accent); }
+.watch input {
+  appearance: none; -webkit-appearance: none;
+  width: 16px; height: 16px; margin: 0; flex: none;
+  background: var(--paper-hi);
+  box-shadow: inset 0 0 0 3px var(--wood-dark);
+  cursor: pointer;
+  display: grid; place-items: center;
+  transition: background var(--press);
+}
+.watch input:checked { background: var(--leaf); }
+.watch input:checked::after {
+  content: '';
+  width: 4px; height: 8px;
+  border: solid #11250b;
+  border-width: 0 3px 3px 0;
+  transform: translateY(-1px) rotate(45deg);
+}
 .watch:active { color: var(--ink); }
 .toggles { display: flex; gap: 14px; flex-wrap: wrap; }
 
 /* ── approvals ─────────────────────────────────────────────────────────── */
-.approvals-panel { border-color: #5a3a33; }
-.approvals-panel h2 { color: #f0a79a; }
+.approvals-panel { background: #ffe6df; }
+.approvals-panel h2 { color: var(--bad-dark); }
 .approval {
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--panel-2);
-  padding: 9px 10px;
+  background: var(--paper-hi);
+  clip-path: var(--notch-sm);
+  box-shadow: inset 0 0 0 3px var(--bad-dark);
+  padding: 10px 11px;
   margin-bottom: 8px;
-  animation: approval-in 300ms cubic-bezier(0.32, 0.72, 0, 1) both;
+  animation: approval-in 200ms steps(4, end) both;
 }
-@keyframes approval-in { from { opacity: 0; transform: translateY(-6px) scale(.98); } }
+@keyframes approval-in { from { opacity: 0; transform: translateY(-8px); } }
 .approval:last-child { margin-bottom: 0; }
-.approval .who { font-size: 11px; letter-spacing: .01em; color: var(--ink-mute); }
-.approval .what { font-size: 13px; line-height: 1.5; margin: 2px 0 5px; overflow-wrap: anywhere; }
+.approval .who { font-size: 11px; font-weight: 600; color: var(--ink-mute); }
+.approval .what { font-size: 13px; line-height: 1.5; margin: 3px 0 6px; overflow-wrap: anywhere; }
 .approval pre {
-  margin: 0 0 7px;
+  margin: 0 0 8px;
   font: 11px/1.55 var(--mono);
-  color: var(--ink-dim);
-  background: #1a1713;
-  border-radius: 6px;
-  padding: 6px 8px;
+  color: var(--paper-2);
+  background: var(--wood-dark);
+  padding: 7px 9px;
   max-height: 110px;
   overflow: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.approval .acts { display: flex; gap: 6px; }
-.approval .acts button { padding: 4px 11px; font-size: 12px; }
-.approval .acts .deny { background: #6d3a31; color: #ffd9d2; }
+.approval .acts { display: flex; gap: 7px; }
+.approval .acts button { padding: 5px 12px; font-size: 12px; }
+.approval .acts .deny {
+  background: var(--bad); color: #fff0ec;
+  box-shadow: inset 0 0 0 3px var(--wood-dark), inset 0 3px 0 3px #e89383;
+}
 
 /* ── sheets ────────────────────────────────────────────────────────────── */
-/* A modal task dims the room and pushes it back; the sheet materialises —
- * blur and scale together — rather than fading in flat. openSheet() in main.js
- * drives --enter from a spring. */
+/* 모달은 방을 체커보드로 덮는다 — 흐리는 게 아니라 가린다. */
 .modal {
   position: fixed; inset: 0;
   display: grid; place-items: center;
   z-index: 20;
   --enter: 1;
-  background: rgba(12, 10, 8, calc(0.72 * var(--enter)));
-  backdrop-filter: blur(calc(14px * var(--enter))) saturate(120%);
+  background:
+    repeating-conic-gradient(#1a0f07 0 25%, transparent 0 50%) 0 0 / 6px 6px,
+    rgba(26, 15, 7, calc(0.62 * var(--enter)));
+  opacity: var(--enter);
 }
 .modal[hidden] { display: none; }
 .sheet {
-  background: #211e1af2;
-  backdrop-filter: blur(30px) saturate(180%);
-  border: 1px solid #ffffff1a;
-  border-radius: 16px;
-  padding: 18px;
+  background: var(--paper);
+  clip-path: var(--notch);
+  box-shadow:
+    inset 0 0 0 4px var(--wood-dark),
+    inset 4px 4px 0 4px var(--paper-hi),
+    inset -4px -4px 0 4px var(--paper-3);
+  padding: 20px;
   width: min(460px, 92vw);
   display: grid; gap: 14px;
-  box-shadow: var(--shadow-3);
-  /* Anchored to whatever opened it, so the sheet grows out of its trigger. */
+  filter: var(--drop-lg);
   transform-origin: var(--origin-x, 50%) var(--origin-y, 50%);
-  transform: scale(calc(0.94 + 0.06 * var(--enter)));
-  opacity: var(--enter);
+  /* 열릴 때 계단으로 커진다 — 스프링 없이 프레임 세 장. */
+  transform: scale(calc(0.9 + 0.1 * var(--enter)));
   will-change: transform;
 }
-.sheet h3 { margin: 0; font-size: 16px; font-weight: 650; letter-spacing: -.01em; }
+.sheet h3 { margin: 0; font-size: 17px; font-weight: 800; letter-spacing: -.01em; color: var(--wood-dark); }
 .sheet-actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
 
-.sheet.narrow { width: min(360px, 90vw); gap: 10px; }
-/* The consequence, said once, in the app's warning colour — not a wall of
- * caution text. The sheet asks the question; this is the part that cannot be
- * undone. */
-.leave-note { margin: 0; font-size: 13px; line-height: 1.55; color: #f0a79a; }
-#leave-yes { background: #a8483c; color: #ffe6e0; }
+.sheet.narrow { width: min(360px, 90vw); gap: 12px; }
+.leave-note { margin: 0; font-size: 13px; line-height: 1.55; font-weight: 700; color: var(--bad-dark); }
+#leave-yes {
+  background: var(--bad); color: #fff0ec;
+  box-shadow: inset 0 0 0 3px var(--wood-dark), inset 0 3px 0 3px #e89383;
+}
 
-.persona-list { display: grid; gap: 8px; }
+.persona-list { display: grid; gap: 9px; }
 .persona {
   display: grid;
-  grid-template-columns: 34px 1fr;
-  gap: 11px;
+  /* The sprite canvas sizes itself (main.js draws it at 2×), so the column is
+     told to take whatever that is. A fixed width here let the character spill
+     over its own description — which is what it was doing. */
+  grid-template-columns: auto 1fr;
+  gap: 12px;
   align-items: center;
   text-align: left;
-  background: var(--panel-2);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 10px 12px;
+  background: var(--paper-2);
+  clip-path: var(--notch-sm);
+  box-shadow: inset 0 0 0 3px var(--wood-dark), inset 0 3px 0 3px var(--paper-hi);
+  padding: 11px 13px;
   color: var(--ink);
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
-  box-shadow: none;
+  filter: none;
 }
-.persona:hover { border-color: var(--accent); filter: none; }
-.persona:active { transform: scale(0.985); }
+.persona:hover { background: var(--paper-hi); }
+.persona:active { transform: translate(2px, 2px); box-shadow: inset 0 0 0 3px var(--wood-dark), inset 0 -3px 0 3px var(--paper-3); }
 .persona canvas { image-rendering: pixelated; }
-.persona b { display: block; font-size: 13px; letter-spacing: .005em; }
-.persona small { color: var(--ink-mute); font-size: 11px; letter-spacing: .01em; }
+.persona b { display: block; font-size: 13px; font-weight: 800; }
+.persona small { color: var(--ink-mute); font-size: 11px; font-weight: 600; }
 
 /* ── type + skill editor ───────────────────────────────────────────────── */
-button.tiny { padding: 3px 9px; font-size: 11px; letter-spacing: .01em; }
+button.tiny { padding: 4px 10px; font-size: 11px; }
 .file-btn { cursor: pointer; display: inline-flex; align-items: center; }
 
-.attachments { display: flex; flex-wrap: wrap; gap: 5px; }
+.attachments { display: flex; flex-wrap: wrap; gap: 6px; }
 .attachments:empty { display: none; }
 .attachments .chip {
-  font-size: 11px; color: var(--ink-dim);
-  background: var(--panel-2); border: 1px solid var(--line);
-  border-radius: 999px; padding: 2px 9px;
-  transition: transform var(--press), border-color var(--calm);
+  font-size: 11px; font-weight: 600; color: var(--ink-dim);
+  background: var(--paper-2);
+  clip-path: var(--notch-sm);
+  box-shadow: inset 0 0 0 2px var(--wood-dark);
+  padding: 3px 9px;
+  transition: transform var(--press), background var(--calm);
 }
-.attachments .chip:active { transform: scale(0.94); }
-.attachments .chip:hover { border-color: #4d4437; }
+.attachments .chip:active { transform: translate(1px, 1px); }
+.attachments .chip:hover { background: var(--paper-hi); }
 
 .sheet.wide { width: min(880px, 94vw); }
 .types-body { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 14px; }
-.type-tabs { display: grid; gap: 5px; align-content: start; }
+.type-tabs { display: grid; gap: 6px; align-content: start; }
 .type-tabs button {
-  background: none; border: 1px solid var(--line); color: var(--ink-dim);
-  text-align: left; font-weight: 500; padding: 7px 10px;
-  box-shadow: none;
+  background: var(--paper-2);
+  color: var(--ink-dim);
+  text-align: left; font-weight: 700; padding: 8px 11px;
+  box-shadow: inset 0 0 0 3px var(--wood-dark);
+  filter: none;
 }
-.type-tabs button.on { border-color: var(--accent); color: var(--ink); background: var(--panel-2); }
+.type-tabs button.on { background: var(--accent); color: var(--accent-ink); }
 
 .type-editor { display: grid; gap: 10px; min-width: 0; }
 .field { display: grid; gap: 5px; }
-.field > span { font-size: 11px; letter-spacing: .02em; color: var(--ink-mute); }
+.field > span { font-size: 11px; font-weight: 700; letter-spacing: .02em; color: var(--wood); }
 .type-editor textarea {
   width: 100%;
-  background: #16130f;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  padding: 9px 11px;
+  background: var(--paper-hi);
+  border: none;
+  clip-path: var(--notch-sm);
+  box-shadow: inset 0 0 0 3px var(--wood-dark);
+  padding: 10px 12px;
   color: var(--ink);
   font: 12px/1.6 var(--mono);
   resize: vertical;
   outline: none;
-  transition: border-color var(--calm), box-shadow var(--calm);
+  transition: box-shadow var(--calm);
 }
-.type-editor textarea:focus { border-color: #6b5a3c; box-shadow: 0 0 0 3px #f0b45a1f; }
-.skills-head { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--ink-mute); }
+.type-editor textarea:focus { box-shadow: inset 0 0 0 3px var(--accent-dark), inset 0 0 0 6px var(--accent); }
+.skills-head { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 700; color: var(--wood); }
+/* The native dropdown arrow is the one piece of OS chrome that would show
+   through, so it is replaced with a drawn triangle. */
 .skills-head select {
   flex: 1;
-  background: var(--panel-2); border: 1px solid var(--line);
-  border-radius: 7px; padding: 4px 8px; font-size: 12px; outline: none;
+  appearance: none; -webkit-appearance: none;
+  background: var(--paper-hi);
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--wood-dark) 50%),
+    linear-gradient(135deg, var(--wood-dark) 50%, transparent 50%);
+  background-position: right 15px top 12px, right 9px top 12px;
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
+  border: none;
+  clip-path: var(--notch-sm);
+  box-shadow: inset 0 0 0 3px var(--wood-dark);
+  padding: 5px 28px 5px 9px; font-size: 12px; font-weight: 600; outline: none;
+  cursor: pointer;
 }
-.saved { margin-right: auto; font-size: 12px; color: var(--ok); }
+.saved { margin-right: auto; font-size: 12px; font-weight: 700; color: var(--leaf-dark); }
 
 /* ── laid out for a wide screen ────────────────────────────────────────── */
-/* This is used landscape, so the room is the thing that gets the space and the
- * two columns beside it are sized to their content rather than to a fraction of
- * the window. What changes across sizes is the columns; the room only ever gets
- * whatever is left, and picks its own whole-number zoom to fit (office.js). */
 @media (min-width: 1500px) {
   .app { --left-w: 288px; --right-w: 380px; }
 }
@@ -892,65 +989,53 @@ button.tiny { padding: 3px 9px; font-size: 11px; letter-spacing: .01em; }
   .panel { padding: 9px 10px; }
 }
 
-/* Wide and short is the normal case here — a laptop lid, or a monitor with the
- * room taking the middle third. Vertical padding is what has to give, because
- * losing 40px of room height costs a whole zoom step. */
 @media (max-height: 860px) {
   .left, .right { padding: 9px; gap: 9px; }
   .panel { padding: 9px 10px; }
   .panel h2 { margin-bottom: 6px; }
-  .hint { margin: 4px auto 8px; }
+  .hint { margin: 6px auto 10px; }
   .hint-sm { margin-bottom: 6px; }
 }
 @media (max-height: 720px) {
-  /* The wordmark goes, not the 유형 button — that is the only way in to the
-   * type editor. */
   .brand .logo, .brand small { display: none; }
   .brand b { font-size: 13px; }
-  .update-bar { height: 32px; }
-  body:has(.update-bar:not([hidden])) .app { height: calc(100% - 32px); }
+  .update-bar { height: 34px; }
+  body:has(.update-bar:not([hidden])) .app { height: calc(100% - 34px); }
 }
 
-/* Portrait is not what this is for, but it must not fall apart: the room keeps
- * the top and the two columns share the bottom, still scrolling. */
 @media (max-aspect-ratio: 1/1) {
   .app {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     grid-template-rows: minmax(220px, 1fr) minmax(0, 1fr);
   }
   .center { grid-column: 1 / -1; }
-  /* Stacked, the columns are side by side and share the width evenly — there
-     is no boundary left for the handle to sit on. */
   .resizer { display: none; }
 }
 
 /* ── accessibility answers ─────────────────────────────────────────────── */
-/* Reduced motion keeps the feedback and drops the travel. */
+/* 이미 steps() 라 움직임이 짧지만, 꺼달라고 한 사람에게는 아예 없앤다. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 1ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 120ms !important;
+    transition-duration: 1ms !important;
   }
   button:active, .plate:active b, .job-card:active, .persona:active,
-  .attachments .chip:active { transform: none; }
-  .msg.in, .approval { animation: fade-in 160ms ease both; }
-  @keyframes fade-in { from { opacity: 0; } }
+  .wplate:active b, .tasks .task:active, .attachments .chip:active { transform: none; }
 }
 
-/* Frostier, not see-through, when the user has asked for less transparency. */
+/* 투명도를 줄여달라고 하면 체커보드를 걷어낸다 — 이미 흐림은 한 군데도 없다. */
 @media (prefers-reduced-transparency: reduce) {
-  .update-bar { background: #2e2716; backdrop-filter: none; }
-  .hint { background: var(--panel); backdrop-filter: none; }
-  .plate b { background: #16130f; backdrop-filter: none; }
-  .modal { background: #0c0a08f2; backdrop-filter: none; }
-  .sheet, .job-ghost { background: var(--panel); backdrop-filter: none; }
+  .modal { background: #1a0f07f2; }
 }
 
 @media (prefers-contrast: more) {
-  :root { --ink-mute: #b4a894; --ink-dim: #ddd2c2; --line: #574d40; }
-  .panel, .sheet, .approval, .job-card, .persona { border-color: var(--line); }
-  .modal { background: #07060560; }
-  .sheet { background: var(--panel); backdrop-filter: none; }
-  .activity li { border-bottom-color: #3d362d; }
+  :root {
+    --ink-mute: #6d5433;
+    --ink-dim: #543417;
+    --line: #8d6a33;
+    --paper: #fffaec;
+    --paper-2: #f7ead0;
+  }
+  .activity li { border-bottom-color: var(--line); }
 }
