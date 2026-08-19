@@ -937,33 +937,43 @@ function drawCharacter(ctx, cx, cy, av, opts = {}) {
  *
  * (cx, cy) 는 알의 한가운데. 최소화된 창은 시든 것처럼 흐리게 그린다.
  */
-export function grape(ctx, cx, cy, { hue = '#8b5cf6', asleep = false, active = false, r = 7, lift = 0 } = {}) {
+/** 포도알 색. 진짜 포도처럼 보라 하나로 간다 — 알마다 톤만 조금씩 다르다. */
+const GRAPE_SKIN = ['#6b3f9e', '#7a48ad', '#5f3690', '#83519c'];
+const GRAPE_OUTLINE = '#3a2059';
+
+export function grape(ctx, cx, cy, { tone = 0, asleep = false, active = false, r = 7, lift = 0 } = {}) {
   const y = Math.round(cy - lift);
-  const skin = asleep ? darken(hue, 0.3) : hue;
-  const dark = darken(skin, 0.3);
-  const light = lighten(skin, 0.28);
+  const base = GRAPE_SKIN[((tone % GRAPE_SKIN.length) + GRAPE_SKIN.length) % GRAPE_SKIN.length];
+  const skin = asleep ? darken(base, 0.28) : base;
+  const dark = darken(skin, 0.26);
+  const light = lighten(skin, 0.3);
+  const glint = lighten(skin, 0.55);
 
   ctx.save();
   if (asleep) ctx.globalAlpha = 0.55;
 
-  // 픽셀 원 — 행마다 폭을 재서 그린다
+  // 윤곽 한 겹 — 알끼리 붙어도 서로 구별된다. 송이에서는 이게 없으면
+  // 보라 덩어리 하나가 된다.
+  for (let dy = -r - 1; dy <= r + 1; dy += 1) {
+    const half = Math.round(Math.sqrt(Math.max(0, (r + 1) * (r + 1) - dy * dy)));
+    if (half) px(ctx, cx - half, y + dy, half * 2, 1, GRAPE_OUTLINE);
+  }
+  // 알 — 행마다 폭을 재서 그린다
   for (let dy = -r; dy <= r; dy += 1) {
     const half = Math.round(Math.sqrt(Math.max(0, r * r - dy * dy)));
     if (!half) continue;
-    const shade = dy > r * 0.35 ? dark : skin;
+    const shade = dy > r * 0.3 ? dark : skin;
     px(ctx, cx - half, y + dy, half * 2, 1, shade);
   }
   // 왼쪽 위에서 오는 빛 — 이게 있어야 구슬이 아니라 알로 보인다
-  px(ctx, cx - Math.round(r * 0.55), y - Math.round(r * 0.55), 2, 2, light);
-  px(ctx, cx - Math.round(r * 0.2), y - Math.round(r * 0.7), 2, 1, light);
-  // 아래쪽 그늘
-  px(ctx, cx - 1, y + r - 1, 3, 1, dark);
+  px(ctx, cx - Math.round(r * 0.5), y - Math.round(r * 0.55), 3, 2, light);
+  px(ctx, cx - Math.round(r * 0.5), y - Math.round(r * 0.55), 2, 1, glint);
   ctx.restore();
 
   // 지금 앞에 나와 있는 창 — 알 위에 얹힌 반짝임
   if (active) {
-    px(ctx, cx - 1, y - r - 3, 3, 1, '#f0b45a');
-    px(ctx, cx, y - r - 4, 1, 3, '#f0b45a');
+    px(ctx, cx - 1, y - r - 4, 3, 1, '#f0b45a');
+    px(ctx, cx, y - r - 5, 1, 3, '#f0b45a');
   }
 }
 

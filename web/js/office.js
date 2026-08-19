@@ -80,8 +80,10 @@ const bigEmptyDesk = (c, x, y, o = {}) => emptyDesk(c, x, y, { ...o, scale: SPRI
  * which is close enough to a wide stage that the fit lands on the step rather
  * than just under it. Widening the zone by 40px is what costs half the size.
  */
-const POD_W = 92;
-const POD_H = 106;
+/* 송이 한 자리. 알을 키우면 송이도 그만큼 커지므로 자리도 같이 넓혀야
+ * 옆 송이와 알이 겹친다 — 다섯 알짜리 줄이 96px 라 92px 자리로는 넘친다. */
+const POD_W = 112;
+const POD_H = 124;
 const POD_COLS_MAX = 4;
 /* 대기 구역의 사람 간격. 이름표가 창 이름을 달고 있어서 30px 로는 라벨이
  * 서로를 덮었다 — 글자가 읽히는 폭까지 벌린다. */
@@ -102,9 +104,11 @@ const ZONE_MIN_H = 196;
 const GROUP_BAND = 0.56;
 const BAND_GAP = 12;
 
-/* 포도알 반지름. 사람이던 때보다 훨씬 작지만 대기 구역의 간격은 그대로 둔다 —
- * 그 간격을 정한 건 알의 크기가 아니라 이름표가 읽히는 폭이기 때문이다. */
-const GRAPE_R = 7;
+/* 포도알 반지름. 대기 구역의 가로 간격은 알 크기와 무관하게 그대로 둔다 —
+ * 그 간격을 정한 건 이름표가 읽히는 폭이기 때문이다.
+ * 송이의 치수(줄 간격·가지 길이·이름표 높이)는 전부 이 값에서 나오므로,
+ * 여기만 키우면 송이도 같은 비율로 커진다. */
+const GRAPE_R = 10;
 
 /** Monitor glow + desk lamp per state. */
 const LOOK = {
@@ -453,37 +457,57 @@ export class Office {
    */
   _bunch(members, cx, cy) {
     const k = members.length;
-    const STEP = 15;          // 알 사이 가로 간격
-    const ROW = 12;           // 줄 간격
-    const top = Math.max(3, Math.min(6, Math.ceil(Math.sqrt(k) + 1)));
+    // 진짜 송이는 알이 서로 닿아 있다. 반지름의 두 배보다 좁게 두면 알이 겹쳐
+    // 붙고, 줄을 반 칸 어긋내면 아랫줄 알이 윗줄 두 알 사이에 끼어 앉는다 —
+    // 사진 속 포도가 그렇게 쌓여 있다.
+    const STEP = GRAPE_R * 2 - 1;
+    const ROW = GRAPE_R * 2 - 5;
+    const wide = Math.max(2, Math.min(5, Math.round(Math.sqrt(k) + 0.8)));
 
-    // 줄마다 몇 개까지 — 위 두 줄은 같고 그 아래로 하나씩 줄어든다
+    /**
+     * 줄 폭은 **아래에서부터** 쌓는다. 맨 아래가 한 알, 위로 갈수록 한 알씩
+     * 넓어지다 상한에서 멈춘다. 그래야 끝이 뾰족한 송이가 된다.
+     *
+     * 위에서부터 채웠더니 남는 알이 맨 아랫줄에 몰려 아래가 뭉툭한 벽돌이
+     * 됐다 — 열네 알이 5·5·4 로 서서 직사각형이었다.
+     *
+     * 알이 모자라 맨 윗줄이 아랫줄보다 좁아지는 건 그대로 둔다. 사진 속
+     * 송이도 꼭지 쪽은 좁다가 가운데서 벌어진다.
+     */
     const rows = [];
-    let left = k;
-    for (let r = 0; left > 0; r += 1) {
-      const cap = Math.max(1, top - Math.max(0, r - 1));
-      const n = Math.min(cap, left);
-      rows.push(n);
-      left -= n;
+    if (k <= 2) {
+      // 두 알까지는 나란히 가지에 매단다. 세로로 세우면 알 하나에 알 하나가
+      // 매달린 꼴이라 송이가 아니라 사고처럼 보인다.
+      rows.push(k);
+    } else {
+      let left = k;
+      for (let n = 1; left > 0; n = Math.min(wide, n + 1)) {
+        const take = Math.min(n, left);
+        rows.push(take);
+        left -= take;
+      }
+      rows.reverse();
     }
 
-    const branchW = Math.max(24, (rows[0] - 1) * STEP + 14);
+    const widest = Math.max(...rows);
+    const branchW = Math.max(26, (widest - 1) * STEP + 16);
     const bunchH = rows.length * ROW;
     // 가지는 송이 맨 위, 송이 전체는 자리의 한가운데에 오도록
-    const branchY = Math.round(cy - bunchH / 2 - 6);
+    const branchY = Math.round(cy - bunchH / 2 - 8);
 
     const seats = [];
     let i = 0;
     rows.forEach((n, r) => {
+      // 줄이 좁아지면서 생기는 어긋남이 곧 알이 끼어 앉는 자리가 된다
       const rowW = (n - 1) * STEP;
       const x0 = cx - rowW / 2;
       for (let c = 0; c < n; c += 1) {
         seats.push({
           person: members[i],
-          // 가지(3px) + 꼭지(5px) + 알 반지름만큼 내려야 가지가 알 위로 보인다.
+          // 가지(3px) + 꼭지 + 알 반지름만큼 내려야 가지가 알 위로 보인다.
           // 10 으로 뒀더니 첫 줄이 가지를 통째로 덮어 버렸다.
           x: Math.round(x0 + c * STEP),
-          y: Math.round(branchY + 16 + r * ROW),
+          y: Math.round(branchY + GRAPE_R + 8 + r * ROW),
           row: r,
           // 첫 줄만 가지에 직접 매달린다
           hangs: r === 0,
@@ -732,14 +756,20 @@ export class Office {
       px(ctx, a.cx + 17, a.deskY - 33, 2, 2, '#2b2b33');
     }
 
+    /**
+     * 고른 사람은 자리째 밝아진다.
+     *
+     * 테두리 한 줄을 두르면 "이 사람" 이 아니라 "이 네모" 가 눈에 들어오고,
+     * 그루터기와 사람 위로 선이 지나가 그림을 자른다.
+     *
+     * 바닥에만 깔아 봤더니 그루터기가 95px 라 자리를 거의 다 덮어서 아무것도
+     * 안 보였다. 그래서 다 그린 위에 옅게 한 겹 얹는다 — 자리 전체가 은은하게
+     * 물들 뿐, 무엇도 가리지 않는다.
+     */
     if (this.selectedId === person.id) {
       ctx.save();
-      ctx.globalAlpha = 0.9;
-      const box = { x: a.x + 4, y: a.y + RUG_TOP - 2, w: CELL_W - 8, h: RUG_H + 4 };
-      px(ctx, box.x, box.y, box.w, 1, '#f0b45a');
-      px(ctx, box.x, box.y + box.h - 1, box.w, 1, '#f0b45a');
-      px(ctx, box.x, box.y, 1, box.h, '#f0b45a');
-      px(ctx, box.x + box.w - 1, box.y, 1, box.h, '#f0b45a');
+      ctx.globalAlpha = 0.22;
+      px(ctx, a.x + 2, a.y + 2, CELL_W - 4, CELL_H - 4, '#f0b45a');
       ctx.restore();
     }
   }
@@ -906,7 +936,9 @@ export class Office {
     const cx = Math.round(x);
     const cy = Math.round(y);
     grape(ctx, cx, cy, {
-      hue: this._hueFor(person.app),
+      // 색은 프로그램이 아니라 포도의 것이다 — 프로그램은 이름표의 색 딱지가
+      // 말한다. 알마다 톤만 조금씩 달라 송이가 한 덩어리로 뭉치지 않는다.
+      tone: hash(person.key) % 4,
       asleep: !!person.minimized,          // 최소화 = 시든 알
       active: !!person.active,             // 지금 앞에 나와 있는 창
       r: GRAPE_R,
@@ -941,7 +973,7 @@ export class Office {
     // 손끝에 매달린 알. 꼭지가 붙어 있어야 딴 것처럼 보인다.
     stem(ctx, Math.round(d.x), Math.round(d.y) - GRAPE_R - 5, 5);
     grape(ctx, Math.round(d.x), Math.round(d.y), {
-      hue: this._hueFor(person.app),
+      tone: hash(person.key) % 4,
       r: GRAPE_R + 1,
       lift: Math.sin(t * 8) * 1.2,
     });
@@ -1043,10 +1075,10 @@ export class Office {
         this.plateHost.appendChild(plate);
         this.winPlates.set(person.key, plate);
       }
-      // Above the head, or below the feet for the front of a circle — the ring
-      // would otherwise stack every label on top of the person behind.
-      const lift = lane * 14;
-      const ty = (below ? y + 8 + lift : y - 32 - lift) * this.scale;
+      // 알 바로 위(또는 아래). 32px 는 사람 키였다 — 알은 반지름 7 이라
+      // 그만큼 띄우면 이름표가 알과 한참 떨어져 누구 것인지 흐려진다.
+      const lift = lane * 13;
+      const ty = (below ? y + GRAPE_R + 3 + lift : y - GRAPE_R - 4 - lift) * this.scale;
       plate.style.transform = `translate(${x * this.scale}px, ${ty}px) translate(-50%, ${below ? '0' : '-100%'})`;
       plate.classList.toggle('dim', !!person.minimized);
       plate.classList.toggle('active', !!person.active);
