@@ -115,7 +115,9 @@ export async function applyUpdate() {
 
 /** 스스로 다시 켤 방법이 있는가 (설치 스크립트가 깔아 둔 실행기). */
 function canRestart() {
-  return fs.existsSync(path.join(ROOT, 'scripts', 'launch.ps1'));
+  return process.platform === 'win32'
+    && fs.existsSync(path.join(ROOT, 'scripts', 'crew.vbs'))
+    && fs.existsSync(path.join(ROOT, 'scripts', 'launch.ps1'));
 }
 
 /**
@@ -131,16 +133,23 @@ function canRestart() {
  */
 export function restartApp({ delayMs = 700 } = {}) {
   if (!canRestart()) return false;
-  const script = path.join(ROOT, 'scripts', 'launch.ps1');
+  const vbs = path.join(ROOT, 'scripts', 'crew.vbs');
   setTimeout(() => {
     try {
-      // detached 를 주면 안 된다. 윈도우에서 그건 "콘솔 없이" 라는 뜻이고,
-      // 콘솔 없이 뜬 powershell.exe 는 아무 일도 안 하고 그냥 죽는다 —
-      // 여섯 가지 조합을 만들어 재 보고서야 알았다. 떼어내지 않아도 부모가
-      // 사라진 자식은 윈도우에서 그대로 살아남으므로 이걸로 충분하다.
+      /*
+       * 바탕화면 아이콘이 가는 길과 같은 길로 간다 (wscript → crew.vbs).
+       *
+       * powershell.exe 를 직접 부르는 건 두 번 다 실패했다.
+       *  · detached 를 주면 콘솔 없이 떠서 아무 일도 안 하고 죽는다.
+       *  · detached 없이 띄우면 우리 콘솔에 붙는데, 그 스크립트가 곧 우리를
+       *    죽이므로 콘솔이 사라지면서 자기도 같이 죽는다 — 앱을 내려놓고
+       *    다시 켜기 직전에 끊겼다.
+       * wscript 는 콘솔이 없고, WScript.Shell.Run 이 띄우는 프로세스는
+       * 우리와 무관하게 산다.
+       */
       const child = spawn(
-        'powershell.exe',
-        ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script, '-Restart', '-NoBrowser'],
+        'wscript.exe',
+        [vbs, '-Restart', '-NoBrowser'],
         { stdio: 'ignore', windowsHide: true, cwd: ROOT },
       );
       child.unref();
