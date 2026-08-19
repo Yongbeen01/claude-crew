@@ -1,7 +1,7 @@
 import {
-  px, floorPatch, rug, room, shelf, whiteboard, wallClock, windowPane,
-  plant, cooler, printer, chair, desk, emptyDesk, character, bubble, avatarOf,
-  door, roundTable, zoneFloor, partition, sofa, coffeeTable, cabinet,
+  px, floorPatch, rug, room, mushroom,
+  plant, chair, desk, emptyDesk, character, bubble, avatarOf,
+  door, zoneFloor, partition, orchardFloor, fence, grape, stem, branch,
 } from './sprites.js';
 
 /**
@@ -102,6 +102,10 @@ const ZONE_MIN_H = 196;
 const GROUP_BAND = 0.56;
 const BAND_GAP = 12;
 
+/* 포도알 반지름. 사람이던 때보다 훨씬 작지만 대기 구역의 간격은 그대로 둔다 —
+ * 그 간격을 정한 건 알의 크기가 아니라 이름표가 읽히는 폭이기 때문이다. */
+const GRAPE_R = 7;
+
 /** Monitor glow + desk lamp per state. */
 const LOOK = {
   starting: { screen: '#1d2733', accent: '#8d8d99', scan: false, lamp: null },
@@ -115,7 +119,6 @@ const LOOK = {
 };
 
 const RUGS = ['#7a6ea0', '#6a8f7a', '#a08268', '#8a6f8f', '#6f88a0', '#a08a60', '#7f7f8f'];
-const TABLES = ['#8a6f5a', '#6f7f8a', '#7f8a6f', '#8a6f7f', '#8a806f', '#6f8a85'];
 
 /**
  * Leaving, in milliseconds from the moment the office first sees it.
@@ -219,8 +222,14 @@ export class Office {
     /** tapping the table itself — the group opens up rather than being renamed */
     this.onGroupClick = () => {};
 
+    /** 알 위에 머물렀을 때 옆에 띄우는 카드 — 아래 _syncGrapeCard */
+    this.grapeCard = null;
+
     canvas.addEventListener('mousemove', (e) => this._onHover(e));
-    canvas.addEventListener('mouseleave', () => { this.hoverSeat = null; });
+    canvas.addEventListener('mouseleave', () => {
+      this.hoverSeat = null;
+      this._syncGrapeCard(null);
+    });
     canvas.addEventListener('pointerdown', (e) => this._onDown(e));
     canvas.addEventListener('pointermove', (e) => this._onMove(e));
     for (const ev of ['pointerup', 'pointercancel']) {
@@ -399,7 +408,7 @@ export class Office {
       // Centred in its share of the band, so a single row of tables sits in the
       // middle of the zone rather than clinging to the top of it.
       const cy = y0 + Math.floor(i / podCols) * podStepY + podStepY / 2 - 6;
-      pods.push({ group: g, members, cx, cy, ...this._ring(members, cx, cy) });
+      pods.push({ group: g, members, cx, cy, ...this._bunch(members, cx, cy) });
       i += 1;
     }
 
@@ -432,32 +441,67 @@ export class Office {
    * seen from above at an angle; more than eight and a second ring forms inside
    * rather than the outer one turning into a solid wall of shoulders.
    */
-  _ring(members, cx, cy) {
+  /**
+   * 한 그룹의 알들이 어디에 달리는가 — 가지에 매달린 포도송이.
+   *
+   * 맨 윗줄은 **가지에 직접** 달린다. 그 줄이 차면 가지는 알 뒤로 가려지고,
+   * 그 다음부터는 아래로 줄을 더해 가며 송이가 굵어진다. 그래서 알이 몇 개
+   * 없을 때는 가지가 보이고, 많아지면 가지 없이 알 덩어리만 보인다.
+   *
+   * 아래로 갈수록 한 줄에 들어가는 알이 하나씩 줄어든다 — 그게 송이가 아래로
+   * 좁아지는 모양을 만든다. 줄은 반 칸씩 어긋나게 놓아 알 사이가 메워진다.
+   */
+  _bunch(members, cx, cy) {
     const k = members.length;
-    const outer = Math.min(k, 6);
-    const inner = k - outer;
-    const rOut = Math.max(22, Math.min(32, 16 + outer * 2.8));
-    // Two people at a table sit across from each other, not one behind the
-    // other — starting the ring at the side is the difference between a pair
-    // and what looks like one person with a shadow.
-    const start = outer <= 2 ? 0 : -Math.PI / 2;
+    const STEP = 15;          // 알 사이 가로 간격
+    const ROW = 12;           // 줄 간격
+    const top = Math.max(3, Math.min(6, Math.ceil(Math.sqrt(k) + 1)));
+
+    // 줄마다 몇 개까지 — 위 두 줄은 같고 그 아래로 하나씩 줄어든다
+    const rows = [];
+    let left = k;
+    for (let r = 0; left > 0; r += 1) {
+      const cap = Math.max(1, top - Math.max(0, r - 1));
+      const n = Math.min(cap, left);
+      rows.push(n);
+      left -= n;
+    }
+
+    const branchW = Math.max(24, (rows[0] - 1) * STEP + 14);
+    const bunchH = rows.length * ROW;
+    // 가지는 송이 맨 위, 송이 전체는 자리의 한가운데에 오도록
+    const branchY = Math.round(cy - bunchH / 2 - 6);
+
     const seats = [];
-    for (let i = 0; i < outer; i += 1) {
-      const a = (i / Math.max(1, outer)) * Math.PI * 2 + start;
-      seats.push({ person: members[i], x: cx + Math.cos(a) * rOut, y: cy + Math.sin(a) * rOut * 0.7 });
-    }
-    for (let i = 0; i < inner; i += 1) {
-      const a = (i / Math.max(1, inner)) * Math.PI * 2 - Math.PI / 2 + 0.5;
-      const r = rOut * 0.5;
-      seats.push({ person: members[outer + i], x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r * 0.7 });
-    }
-    // Draw back-to-front so someone nearer the viewer overlaps someone further.
+    let i = 0;
+    rows.forEach((n, r) => {
+      const rowW = (n - 1) * STEP;
+      const x0 = cx - rowW / 2;
+      for (let c = 0; c < n; c += 1) {
+        seats.push({
+          person: members[i],
+          // 가지(3px) + 꼭지(5px) + 알 반지름만큼 내려야 가지가 알 위로 보인다.
+          // 10 으로 뒀더니 첫 줄이 가지를 통째로 덮어 버렸다.
+          x: Math.round(x0 + c * STEP),
+          y: Math.round(branchY + 16 + r * ROW),
+          row: r,
+          // 첫 줄만 가지에 직접 매달린다
+          hangs: r === 0,
+        });
+        i += 1;
+      }
+    });
+
+    // 뒤에서 앞으로 — 아래 줄이 위 줄을 덮어야 송이로 보인다
     seats.sort((a, b) => a.y - b.y);
-    // Names go in two lanes. Six labels around one small table would otherwise
-    // pile into one line of unreadable ellipses; alternating them costs a
-    // little tidiness and buys every name being legible.
-    seats.forEach((s, i) => { s.lane = i % 2; });
-    return { seats, r: rOut };
+    // 이름표는 두 줄로 번갈아 건다. 한 송이에 여섯 개가 한 줄로 서면 전부
+    // 말줄임이 되어 아무것도 못 읽는다.
+    seats.forEach((s, n) => { s.lane = n % 2; });
+    return {
+      seats,
+      r: Math.max(22, branchW / 2),
+      branch: { x: Math.round(cx - branchW / 2), y: branchY, w: branchW },
+    };
   }
 
   /** The zoom is decided in _layout(); this only sizes the buffers to match. */
@@ -491,29 +535,26 @@ export class Office {
     floorPatch(ctx, 0, 0, w, h);
     room(ctx, 0, 0, w, h, WALL_TOP, WALL);
 
-    // Wall dressing, kept out from behind the two zone signs — those hang at
-    // the foot of the wall over the middle of each zone.
-    shelf(ctx, 10, 9);
-    wallClock(ctx, g.x0 + 52, 20, new Date());
-    whiteboard(ctx, Math.round(g.ai.x + g.ai.w - 44), 8);
-    if (w > 420) windowPane(ctx, w - 68, 10);
+    // 숲에 걸린 것들 — 팻말이 걸리는 자리는 비워 둔다.
+    mushroom(ctx, 16, WALL_TOP - 2);
+    mushroom(ctx, g.x0 + 52, WALL_TOP - 4, '#c9a7ff');
+    if (w > 420) mushroom(ctx, w - 68, WALL_TOP - 3, '#ffd88f');
 
-    // Three floors, three colours — the room is desks, then tables, then the
-    // waiting area, and each is a different place to be.
+    // 왼쪽은 숲의 빈터(사람들이 일하는 곳), 오른쪽 두 띠는 포도밭이다.
     zoneFloor(ctx, g.ai.x - 6, g.ai.y - 6, g.ai.w + 12, g.zoneH + 10, '#f0b45a');
     if (g.showWin) {
       const bandH = (g.win.looseTop - BAND_GAP / 2) - (g.win.y - 6);
-      zoneFloor(ctx, g.win.x - 6, g.win.y - 6, g.win.w + 12, bandH, '#7fd1c0');
-      zoneFloor(ctx, g.win.x - 6, g.win.looseTop - BAND_GAP / 2, g.win.w + 12,
+      orchardFloor(ctx, g.win.x - 6, g.win.y - 6, g.win.w + 12, bandH, '#7fd1c0');
+      orchardFloor(ctx, g.win.x - 6, g.win.looseTop - BAND_GAP / 2, g.win.w + 12,
         (g.win.y + g.zoneH + 4) - (g.win.looseTop - BAND_GAP / 2), '#a77bd8');
       partition(ctx, g.divider.x, g.divider.y, g.divider.h);
       this._dressWindows(ctx, g);
     }
 
-    // floor props tucked into the corridor
+    // 숲 바닥에 놓인 것들
     plant(ctx, 14, h - 8);
-    cooler(ctx, g.win.x - 18, h - 8);
-    if (g.ai.cells.length > 2) printer(ctx, g.ai.x + g.ai.w - 10, h - 10);
+    mushroom(ctx, g.win.x - 18, h - 8);
+    if (g.ai.cells.length > 2) plant(ctx, g.ai.x + g.ai.w - 10, h - 10);
 
     this.hitboxes = [];
 
@@ -761,31 +802,25 @@ export class Office {
    * dropped only when there is room for it, so a small room is bare rather than
    * cluttered with furniture growing through the walls.
    */
+  /**
+   * 두 밭을 나무 울타리로 두른다.
+   *
+   * 바닥색만으로는 "여기까지가 이 밭" 이 읽히지 않는다 — 경계는 서 있는 물건이
+   * 말해 준다. 위는 묶어 둔 그룹의 밭, 아래는 아직 안 묶은 알들의 밭이다.
+   */
   _dressWindows(ctx, g) {
-    const left = g.win.x;
-    const right = g.win.x + g.win.w;
+    const left = g.win.x - 4;
+    const width = g.win.w + 8;
+    const topY = g.win.y - 4;
     const bandBottom = g.win.looseTop - BAND_GAP;
+    const looseTop = g.win.looseTop - 2;
+    const floor = g.win.y + g.zoneH + 2;
 
-    // Upper band — the meeting side.
-    if (g.win.w > 150) {
-      cabinet(ctx, left + 14, bandBottom - 6);
-      plant(ctx, right - 12, bandBottom - 4);
-    } else if (g.win.w > 96) {
-      plant(ctx, right - 12, bandBottom - 4);
-    }
-    if (g.win.w > 260) whiteboard(ctx, Math.round(left + g.win.w / 2 - 22), 8);
+    if (bandBottom - topY > 24) fence(ctx, left, topY, width, bandBottom - topY);
+    if (floor - looseTop > 20) fence(ctx, left, looseTop, width, floor - looseTop);
 
-    // Lower band — the lounge. The sofa faces into the room, table in front.
-    const y = g.win.looseTop;
-    const floor = g.win.y + g.zoneH;
-    const mid = Math.round((y + floor) / 2);
-    if (g.win.w > 170 && floor - y > 40) {
-      sofa(ctx, left + 34, mid + 12);
-      coffeeTable(ctx, left + 70, mid + 14);
-      plant(ctx, right - 14, floor - 2);
-    } else if (g.win.w > 110) {
-      coffeeTable(ctx, left + 24, mid + 12);
-    }
+    // 밭 귀퉁이의 나무 한 그루
+    if (g.win.w > 150) plant(ctx, g.win.x + g.win.w - 12, bandBottom - 6);
   }
 
   // ── the windows zone ──────────────────────────────────────────────────────
@@ -817,8 +852,13 @@ export class Office {
         px(ctx, pod.cx - POD_W / 2 + 8, pod.cy - POD_H / 2 + 10, POD_W - 16, POD_H - 20, '#f0b45a');
         ctx.restore();
       }
-      roundTable(ctx, pod.cx, pod.cy, Math.round(pod.r * 0.48), TABLES[hash(pod.group.id) % TABLES.length]);
-      for (const s of pod.seats) this._drawWindowPerson(ctx, s.person, s.x, s.y, now);
+      // 가지를 먼저. 알이 늘면 그 앞에 매달려 가지를 가린다 — 그래서 알이
+      // 몇 개 없을 때만 가지가 보인다.
+      branch(ctx, pod.branch.x, pod.branch.y, pod.branch.w);
+      for (const s of pod.seats) {
+        if (s.hangs) stem(ctx, s.x, pod.branch.y + 3, s.y - pod.branch.y - GRAPE_R - 2);
+      }
+      for (const s of pod.seats) this._drawGrape(ctx, s.person, s.x, s.y, now);
     }
 
     // The lower band is always drawn, empty or not — it is where you drop a
@@ -834,29 +874,35 @@ export class Office {
     // A low rail rather than a hairline: this is a real boundary in the room.
     px(ctx, g.win.x + 2, y - 7, g.win.w - 4, 2, '#00000026');
     px(ctx, g.win.x + 2, y - 7, g.win.w - 4, 1, '#ffffff1c');
-    for (const s of g.win.loose) this._drawWindowPerson(ctx, s.person, s.x, s.y, now);
+    for (const s of g.win.loose) this._drawGrape(ctx, s.person, s.x, s.y, now);
   }
 
-  _drawWindowPerson(ctx, person, x, y, now) {
+  /**
+   * 창 하나 = 포도알 하나.
+   *
+   * 알의 색은 그 프로그램의 색이다. 사람으로 그리던 때 배지가 하던 일을 이제
+   * 알 자체가 한다 — 같은 프로그램이면 같은 색.
+   */
+  _drawGrape(ctx, person, x, y, now) {
     if (!person) return;
     const dragging = this.drag?.moved && this.drag.kind === 'win' && this.drag.key === person.key;
     if (dragging) return;
-    const av = avatarOf(hash(person.key), '');
-    const t = now / 1000 + av.phase * 6;
-    // Minimized is asleep: the window is still yours, it just is not on screen.
-    const asleep = person.minimized;
-    bigChar(ctx, Math.round(x), Math.round(y), av, {
-      bob: asleep ? 2 : Math.sin(t * 1.3) * 0.5,
-      blink: asleep || Math.sin(t * 0.9 + av.phase * 10) > 0.985,
-      alpha: asleep ? 0.5 : 1,
-      badge: this._hueFor(person.app),
-      droop: asleep ? 1 : 0,
+    const phase = (hash(person.key) % 100) / 100;
+    const t = now / 1000 + phase * 6;
+    const cx = Math.round(x);
+    const cy = Math.round(y);
+    grape(ctx, cx, cy, {
+      hue: this._hueFor(person.app),
+      asleep: !!person.minimized,          // 최소화 = 시든 알
+      active: !!person.active,             // 지금 앞에 나와 있는 창
+      r: GRAPE_R,
+      // 바람에 아주 조금. 흔들림이 크면 알이 아니라 풍선이 된다.
+      lift: person.minimized ? 0 : Math.sin(t * 1.1) * 0.6,
     });
-    if (person.active) {
-      // the one tab actually in front right now
-      px(ctx, Math.round(x) - 1, Math.round(y) - 34, 3, 3, '#f0b45a');
-    }
-    this.hitboxes.push({ kind: 'win', person, x: x - 10, y: y - 32, w: 20, h: 34 });
+    this.hitboxes.push({
+      kind: 'win', person, x: cx - GRAPE_R - 2, y: cy - GRAPE_R - 2,
+      w: GRAPE_R * 2 + 4, h: GRAPE_R * 2 + 4,
+    });
   }
 
   /** Whoever the pointer is carrying, drawn at the cursor. */
@@ -878,10 +924,12 @@ export class Office {
     }
     const person = this.windowPeople.find((p) => p.key === d.key);
     if (!person) return;
-    bigChar(ctx, Math.round(d.x), Math.round(d.y + 12), avatarOf(hash(person.key), ''), {
-      bob: Math.sin(t * 8) * 1.2,
-      step: t * 7,
-      badge: this._hueFor(person.app),
+    // 손끝에 매달린 알. 꼭지가 붙어 있어야 딴 것처럼 보인다.
+    stem(ctx, Math.round(d.x), Math.round(d.y) - GRAPE_R - 5, 5);
+    grape(ctx, Math.round(d.x), Math.round(d.y), {
+      hue: this._hueFor(person.app),
+      r: GRAPE_R + 1,
+      lift: Math.sin(t * 8) * 1.2,
     });
   }
 
@@ -1004,7 +1052,13 @@ export class Office {
       if (plate.title !== title) plate.title = title;
     };
 
+    // 송이는 알을 15px 간격으로 붙여 놓는데 이름표는 그 다섯 배 넓다. 알이
+    // 네 개를 넘으면 이름표가 서로를 덮어 아무것도 못 읽는 글자 무더기가 된다 —
+    // 스무 알짜리 송이를 그려 보고서야 그 꼴을 봤다. 그 위로는 이름표를 걷고,
+    // 송이 이름표(이름·개수)와 알에 손을 올렸을 때 뜨는 카드에 맡긴다.
+    const LABEL_CAP = 4;
     for (const pod of g.win.pods) {
+      if (pod.seats.length > LABEL_CAP) continue;
       for (const s of pod.seats) place(s.person, s.x, s.y, s.y > pod.cy, s.lane);
     }
     // The waiting area is a dense row, so its labels alternate above and below
@@ -1088,11 +1142,55 @@ export class Office {
     return this._hit({ x: (clientX - r.left) / this.scale, y: (clientY - r.top) / this.scale }, kinds);
   }
 
+  /**
+   * 알 옆에 띄우는 카드.
+   *
+   * 알 위의 이름표는 좁아서 긴 이름이 말줄임으로 잘린다 — 송이에 여섯 알이
+   * 달리면 더 그렇다. 그래서 손이 올라간 알 하나만은 프로그램과 창 이름을
+   * 온전히 보여 준다. 알 오른쪽에 붙이되, 자리가 없으면 왼쪽으로 넘긴다.
+   */
+  _syncGrapeCard(hit) {
+    if (!hit) {
+      if (this.grapeCard) this.grapeCard.hidden = true;
+      return;
+    }
+    if (!this.grapeCard) {
+      const card = document.createElement('div');
+      card.className = 'gcard';
+      card.innerHTML = '<i class="app"></i><b></b>';
+      this.plateHost.appendChild(card);
+      this.grapeCard = card;
+    }
+    const card = this.grapeCard;
+    const { person } = hit;
+    const appEl = card.querySelector('.app');
+    if (appEl.textContent !== (person.app ?? '')) appEl.textContent = person.app ?? '';
+    const hue = this._hueFor(person.app);
+    if (appEl.dataset.hue !== hue) {
+      appEl.dataset.hue = hue;
+      appEl.style.background = hue;
+      appEl.style.color = inkOn(hue);
+    }
+    const b = card.querySelector('b');
+    if (b.textContent !== person.name) b.textContent = person.name;
+
+    card.hidden = false;
+    // 재기 전에 보여야 폭이 나온다. 알 오른쪽이 좁으면 왼쪽으로.
+    const cw = card.offsetWidth;
+    const stage = this.canvas.width / (window.devicePixelRatio > 1 ? 1 : 1);
+    const rightX = (hit.x + hit.w + 6) * this.scale;
+    const flip = rightX + cw > stage;
+    const x = flip ? (hit.x - 6) * this.scale - cw : rightX;
+    const y = (hit.y + hit.h / 2) * this.scale;
+    card.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px) translate(0, -50%)`;
+  }
+
   _onHover(e) {
     if (this.drag) return;
     const p = this._toBuffer(e);
     const hit = this._hit(p);
     this.hoverSeat = hit?.kind === 'seat' && !hit.person ? hit.seat : null;
+    this._syncGrapeCard(hit?.kind === 'win' ? hit : null);
     this.canvas.style.cursor = hit && hit.kind !== 'zone' ? 'pointer' : 'default';
 
     // Head-patting easter egg: rub back and forth over someone's head.

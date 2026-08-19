@@ -67,24 +67,112 @@ export function avatarOf(seed, type = '') {
   };
 }
 
-// ── floor & room ────────────────────────────────────────────────────────────
-const PLANK_A = '#b98a58';
-const PLANK_B = '#b0804e';
-const PLANK_LINE = '#9a6c3f';
+// ── 숲 바닥과 숲 ────────────────────────────────────────────────────────────
+const MOSS_A = '#46663a';
+const MOSS_B = '#3e5c33';
+const MOSS_LINE = '#35502c';
+const DIRT = '#5b4630';
 
+/**
+ * 흩뿌리는 것들의 자리는 좌표에서 뽑는다.
+ *
+ * 이 그림은 1초에 24번 다시 그려진다. Math.random 으로 풀·돌을 놓으면 매 프레임
+ * 자리가 바뀌어 바닥 전체가 지글거린다 — 자리는 좌표의 함수여야 가만히 있는다.
+ */
+function noise(x, y) {
+  let n = (Math.imul(x | 0, 0x27d4eb2d) ^ Math.imul(y | 0, 0x165667b1)) >>> 0;
+  n ^= n >>> 15;
+  n = Math.imul(n, 0x2545f491) >>> 0;
+  return (n >>> 8) / 0x1000000;
+}
+
+/** 이끼 낀 숲 바닥. 흙이 드러난 자리와 풀포기가 섞인다. */
 export function floorPatch(ctx, x, y, w, h) {
-  px(ctx, x, y, w, h, PLANK_A);
+  px(ctx, x, y, w, h, MOSS_A);
   const ph = TILE;
   for (let row = 0, i = 0; row < h; row += ph, i += 1) {
     const rh = Math.min(ph, h - row);
-    if (i % 2) px(ctx, x, y + row, w, rh, PLANK_B);
-    px(ctx, x, y + row, w, 1, PLANK_LINE);
-    px(ctx, x, y + row + 1, w, 1, lighten(i % 2 ? PLANK_B : PLANK_A, 0.05));
-    // staggered seams — long planks read as a wooden floor
-    for (let sx = i % 2 ? TILE * 2 : TILE * 3.5; sx < w; sx += TILE * 4) {
-      px(ctx, x + sx, y + row, 1, rh, PLANK_LINE);
+    if (i % 2) px(ctx, x, y + row, w, rh, MOSS_B);
+    px(ctx, x, y + row, w, 1, MOSS_LINE);
+  }
+  // 흙이 드러난 자리 — 이끼만 깔면 카펫처럼 보인다
+  for (let gy = 0; gy < h; gy += TILE * 2) {
+    for (let gx = 0; gx < w; gx += TILE * 2) {
+      const n = noise(gx, gy);
+      if (n > 0.72) {
+        const pw = 8 + Math.floor(n * 14);
+        px(ctx, x + gx + 2, y + gy + 3, pw, 4, DIRT);
+        px(ctx, x + gx + 3, y + gy + 3, pw - 3, 1, lighten(DIRT, 0.1));
+      } else if (n < 0.2) {
+        // 풀포기 셋
+        const c = lighten(MOSS_A, 0.18);
+        px(ctx, x + gx + 4, y + gy + 4, 1, 4, c);
+        px(ctx, x + gx + 6, y + gy + 2, 1, 6, c);
+        px(ctx, x + gx + 8, y + gy + 5, 1, 3, c);
+      }
     }
   }
+}
+
+/**
+ * 포도밭 바닥. 숲 바닥과 달리 사람이 갈아 놓은 땅이라 고랑이 나 있다.
+ * 구역마다 다른 색을 얹어 "여기는 다른 밭" 이라고 말한다.
+ */
+export function orchardFloor(ctx, x, y, w, h, tint) {
+  px(ctx, x, y, w, h, '#55703c');
+  ctx.save();
+  ctx.globalAlpha = 0.22;
+  px(ctx, x, y, w, h, tint);
+  ctx.restore();
+  // 고랑
+  for (let i = 6; i < h; i += 11) {
+    px(ctx, x, y + i, w, 2, '#4a6234');
+    px(ctx, x, y + i + 2, w, 1, '#6a8a4c');
+  }
+  // 밭에 드문드문 난 풀
+  for (let gx = 0; gx < w; gx += 14) {
+    const n = noise(gx + x, y);
+    if (n > 0.6) px(ctx, x + gx + 3, y + 3 + Math.floor(n * (h - 8)), 1, 3, '#7fa055');
+  }
+}
+
+/**
+ * 나무 울타리 — 밭의 경계.
+ *
+ * 선 하나로 긋지 않는다. 이 화면에서 경계는 "넘어가면 다른 밭" 이라는 뜻이고,
+ * 그건 바닥색이 아니라 서 있는 물건이 말해 준다.
+ */
+export function fence(ctx, x, y, w, h) {
+  const POST = '#7a5a3a';
+  const POST_D = '#5e4429';
+  const RAIL = '#8a6a45';
+  const POST_H = 9;
+
+  // 기둥은 **테두리에만** 짧게 선다. 밭을 가로질러 세우면 울타리가 아니라
+  // 창살이 된다 — 처음에 그렇게 그려 놓고 화면을 보고서야 알았다.
+  const posts = (ry) => {
+    for (let i = 0; i <= w - 3; i += 26) {
+      const pxx = x + i;
+      px(ctx, pxx, ry - POST_H + 2, 3, POST_H, POST);
+      px(ctx, pxx + 2, ry - POST_H + 2, 1, POST_H, POST_D);
+      px(ctx, pxx, ry - POST_H + 2, 3, 1, lighten(POST, 0.22));
+    }
+  };
+  const railH = (ry) => {
+    px(ctx, x, ry, w, 2, RAIL);
+    px(ctx, x, ry, w, 1, lighten(RAIL, 0.16));
+  };
+  const railV = (rx) => {
+    px(ctx, rx, y, 2, h, RAIL);
+    px(ctx, rx, y, 1, h, lighten(RAIL, 0.12));
+  };
+
+  posts(y + 2);
+  posts(y + h);
+  railH(y);
+  railH(y + h - 2);
+  railV(x);
+  railV(x + w - 2);
 }
 
 /** Area rug under a workstation: solid field, darker border, woven edge. */
@@ -99,21 +187,69 @@ export function rug(ctx, x, y, w, h, color) {
   ctx.restore();
 }
 
-/** The room shell: back wall along the top, thin walls on the other sides. */
+/**
+ * 숲. 방의 껍데기가 있던 자리다.
+ *
+ * 위쪽 띠(wallTop)는 벽이 아니라 **깊은 숲**이다 — 어두운 수관 아래 나무가
+ * 늘어서 있고, 그 사이로 빛이 샌다. 가장자리는 덤불로 닫는다. 자리(wallTop,
+ * wall)는 그대로 두었다: 문과 팻말이 그 치수를 기준으로 놓이기 때문이다.
+ */
 export function room(ctx, x, y, w, h, wallTop, wall) {
-  const WALL = '#e7dfd2';
-  const WALL_D = '#cfc4b3';
-  const TRIM = '#8d7a63';
+  const DEEP = '#1c2a1e';
+  const CANOPY = '#243523';
+  const TRUNK = '#4a3728';
+  const TRUNK_L = '#5a4433';
+  const BUSH = '#33512b';
+  const GLOW = '#8fe3c4';
 
-  px(ctx, x, y, w, wallTop, WALL);
-  for (let i = 0; i < w; i += TILE) px(ctx, x + i, y, 1, wallTop - 4, WALL_D);
-  px(ctx, x, y + wallTop - 5, w, 2, WALL_D);
-  px(ctx, x, y + wallTop - 3, w, 3, TRIM);
+  // 깊은 숲 — 위로 갈수록 어둡다
+  px(ctx, x, y, w, wallTop, CANOPY);
+  px(ctx, x, y, w, Math.round(wallTop * 0.45), DEEP);
 
-  px(ctx, x, y + wallTop, wall, h - wallTop, WALL_D);
-  px(ctx, x + w - wall, y + wallTop, wall, h - wallTop, WALL_D);
-  px(ctx, x, y + h - wall, w, wall, TRIM);
-  px(ctx, x, y + h - wall, w, 1, darken(TRIM, 0.25));
+  // 나무들. 자리는 좌표에서 뽑으므로 프레임마다 흔들리지 않는다.
+  for (let i = 6; i < w - 6; i += 34) {
+    const n = noise(i, 7);
+    const tw = 5 + Math.round(n * 4);
+    const th = Math.round(wallTop * (0.55 + n * 0.4));
+    const tx = x + i + Math.round(n * 8);
+    px(ctx, tx, y + wallTop - th, tw, th, TRUNK);
+    px(ctx, tx, y + wallTop - th, 1, th, TRUNK_L);
+    // 가지에 걸린 잎
+    px(ctx, tx - 4, y + wallTop - th - 2, tw + 8, 4, BUSH);
+    px(ctx, tx - 2, y + wallTop - th - 5, tw + 4, 3, lighten(BUSH, 0.1));
+    // 마법의 숲인 이유 — 나무 사이에 떠 있는 빛
+    if (n > 0.62) {
+      ctx.save();
+      ctx.globalAlpha = 0.5;
+      px(ctx, tx + tw + 3, y + wallTop - Math.round(th * 0.6), 2, 2, GLOW);
+      ctx.restore();
+    }
+  }
+
+  // 숲과 땅이 만나는 선 — 덤불
+  for (let i = 0; i < w; i += 7) {
+    const n = noise(i, 21);
+    px(ctx, x + i, y + wallTop - 4 - Math.round(n * 3), 7, 6 + Math.round(n * 3), BUSH);
+  }
+  px(ctx, x, y + wallTop, w, 1, '#2b4523');
+
+  // 양옆·아래는 덤불로 닫는다 (벽이 있던 자리)
+  px(ctx, x, y + wallTop, wall, h - wallTop, BUSH);
+  px(ctx, x + w - wall, y + wallTop, wall, h - wallTop, BUSH);
+  px(ctx, x, y + h - wall, w, wall, BUSH);
+  px(ctx, x, y + h - wall, w, 1, darken(BUSH, 0.25));
+}
+
+/** 빛나는 버섯 — 마법의 숲에서 이게 조명이다. */
+export function mushroom(ctx, cx, cy, color = '#8fe3c4') {
+  px(ctx, cx - 1, cy - 5, 2, 5, '#e8dcc8');       // 대
+  px(ctx, cx - 5, cy - 9, 10, 4, color);          // 갓
+  px(ctx, cx - 3, cy - 11, 6, 2, lighten(color, 0.2));
+  px(ctx, cx - 5, cy - 6, 10, 1, darken(color, 0.28));
+  ctx.save();
+  ctx.globalAlpha = 0.28;
+  px(ctx, cx - 7, cy - 8, 14, 3, color);          // 번지는 빛
+  ctx.restore();
 }
 
 // ── wall decorations ────────────────────────────────────────────────────────
@@ -237,11 +373,11 @@ export function chair(ctx, cx, cy, color = '#454c5e') {
 
 /** An empty desk — the click target for hiring someone into that seat. */
 function drawEmptyDesk(ctx, cx, cy, { hover = false } = {}) {
-  desk(ctx, cx, cy, { screen: '#1a1d22', accent: '#3a3f4c', scan: 0 });
+  desk(ctx, cx, cy, { screen: '#2b3b30', accent: '#46614f', scan: 0 });
   const y = cy - 30;
   ctx.save();
   ctx.globalAlpha = hover ? 0.95 : 0.55;
-  const ink = hover ? '#f0b45a' : '#e7dfd2';
+  const ink = hover ? '#f0b45a' : '#cfe8d6';
   // a plus sign floating over the seat
   px(ctx, cx - 1, y - 22, 3, 11, ink);
   px(ctx, cx - 5, y - 18, 11, 3, ink);
@@ -249,9 +385,11 @@ function drawEmptyDesk(ctx, cx, cy, { hover = false } = {}) {
 }
 
 /**
- * Desk seen from above. (cx, cy) is the middle of its front edge; the worker
- * sits behind it, so the surface is drawn after the character and hides
- * everything below their chest.
+ * 그루터기 작업대. (cx, cy) 는 앞면 한가운데이고, 일하는 사람은 뒤에 앉는다.
+ *
+ * 책상이 하던 일은 그대로 한다 — 모니터 자리에 **떠 있는 수정**이 놓이고,
+ * 그 빛깔이 예전 화면 색과 같은 뜻이다(초록은 일하는 중, 빨강은 승인 대기,
+ * 회색은 쉬는 중). 그림만 숲으로 바뀌었지 읽는 법은 바뀌지 않는다.
  */
 function drawDesk(ctx, cx, cy, { screen = '#1b2430', accent = '#7fd1c0', scan = 0, lamp = null } = {}) {
   const W = 76;
@@ -259,38 +397,73 @@ function drawDesk(ctx, cx, cy, { screen = '#1b2430', accent = '#7fd1c0', scan = 
   const x = cx - W / 2;
   const y = cy - H;
 
-  px(ctx, x, y + H - 3, W, 3, '#6b4a2c'); // front edge
-  px(ctx, x, y, W, H - 3, '#a97d52'); // surface
-  px(ctx, x, y, W, 2, '#c49a6a'); // far edge highlight
-  px(ctx, x + 2, y + 2, W - 4, 1, '#b98a5e');
+  const BARK = '#6b4a2c';
+  const BARK_D = '#54371f';
+  const WOOD = '#b08a5c';
+  const RING = '#96703f';
+  const MOSS = '#4d7a3e';
 
-  // monitor, right hand side
-  const mx = cx + 16;
-  px(ctx, mx - 13, y + 3, 26, 18, '#2b303c');
-  px(ctx, mx - 11, y + 5, 22, 13, screen);
-  for (let i = 0; i < 5; i += 1) {
-    const w = 3 + ((i * 5 + Math.floor(scan)) % 15);
-    px(ctx, mx - 10, y + 6 + i * 2.4, w, 1, accent);
+  // 잘린 면. 모서리를 깎아 둥글게 — 네모난 판이면 아무리 나이테를 그어도
+  // 그루터기가 아니라 책상으로 읽힌다.
+  const top = H - 4;
+  for (let ry = 0; ry < top; ry += 1) {
+    const t = ry / (top - 1);
+    const cut = Math.round(Math.sin(Math.PI * t) * 0 + (t < 0.18 || t > 0.82 ? 5 : t < 0.34 || t > 0.66 ? 2 : 0));
+    px(ctx, x + cut, y + ry, W - cut * 2, 1, WOOD);
   }
-  px(ctx, mx - 3, y + 21, 6, 2, '#22262f');
-  px(ctx, mx - 7, y + 23, 14, 2, '#3a3f4c');
+  px(ctx, x + 5, y, W - 10, 1, lighten(WOOD, 0.16));
+  // 나이테
+  for (let i = 1; i <= 3; i += 1) {
+    const iw = W - 12 - i * 12;
+    const ih = top - 4 - i * 4;
+    if (iw <= 8 || ih <= 2) break;
+    const ix = x + 6 + i * 6;
+    const iy = y + 2 + i * 2;
+    px(ctx, ix + 2, iy, iw - 4, 1, RING);
+    px(ctx, ix + 2, iy + ih, iw - 4, 1, RING);
+    px(ctx, ix, iy + 1, 1, ih - 1, RING);
+    px(ctx, ix + iw - 1, iy + 1, 1, ih - 1, RING);
+  }
+  // 껍질 — 앞면과 양옆
+  px(ctx, x + 5, y + top, W - 10, 4, BARK);
+  px(ctx, x + 5, y + H - 2, W - 10, 2, BARK_D);
+  px(ctx, x + 3, y + 5, 2, top - 10, BARK);
+  px(ctx, x + W - 5, y + 5, 2, top - 10, BARK);
+  // 밑동에 낀 이끼
+  px(ctx, x + 9, y + top, 10, 2, MOSS);
+  px(ctx, x + W - 26, y + top, 8, 2, MOSS);
 
-  // keyboard + mouse + mug + papers
-  px(ctx, cx - 26, y + 17, 20, 6, '#d5dae4');
-  px(ctx, cx - 25, y + 18, 18, 1, '#9aa3b1');
-  px(ctx, cx - 25, y + 20, 18, 1, '#9aa3b1');
-  px(ctx, cx - 4, y + 18, 4, 5, '#d5dae4');
-  px(ctx, cx - 30, y + 6, 6, 6, '#e0705b');
-  px(ctx, cx - 29, y + 7, 4, 2, '#f0a090');
-  px(ctx, cx - 24, y + 8, 2, 2, '#e0705b');
-  px(ctx, cx - 22, y + 4, 12, 9, '#f2eee2');
-  px(ctx, cx - 21, y + 6, 9, 1, '#b9b3a4');
-  px(ctx, cx - 21, y + 9, 7, 1, '#b9b3a4');
+  // 떠 있는 수정 — 모니터가 있던 자리
+  const mx = cx + 16;
+  ctx.save();
+  ctx.globalAlpha = 0.3;
+  px(ctx, mx - 10, y + 4, 20, 16, accent);           // 번지는 빛
+  ctx.restore();
+  px(ctx, mx - 3, y + 2, 6, 4, lighten(screen, 0.25));
+  px(ctx, mx - 6, y + 6, 12, 9, screen);
+  px(ctx, mx - 4, y + 15, 8, 3, darken(screen, 0.2));
+  px(ctx, mx - 4, y + 7, 3, 6, accent);              // 안에서 도는 빛
+  for (let i = 0; i < 3; i += 1) {
+    const w = 1 + ((i * 3 + Math.floor(scan)) % 5);
+    px(ctx, mx - 1, y + 8 + i * 2.4, w, 1, accent);
+  }
+  px(ctx, mx - 5, y + 19, 10, 2, '#4a3728');         // 받침
+
+  // 이끼 낀 자리, 도토리, 펼쳐 둔 잎사귀 — 예전의 키보드·머그·서류 자리
+  px(ctx, cx - 26, y + 17, 20, 6, '#4d7a3e');
+  px(ctx, cx - 25, y + 18, 18, 1, '#6a9a54');
+  px(ctx, cx - 4, y + 18, 4, 5, '#8b6b45');
+  px(ctx, cx - 30, y + 6, 6, 6, '#8b6b45');
+  px(ctx, cx - 29, y + 7, 4, 2, '#a98a5e');
+  px(ctx, cx - 22, y + 4, 12, 9, '#7fa055');
+  px(ctx, cx - 21, y + 6, 9, 1, '#5f7f3c');
+  px(ctx, cx - 21, y + 9, 7, 1, '#5f7f3c');
 
   if (lamp) {
+    // 등불 대신 매달린 빛나는 버섯
     px(ctx, cx + 30, y + 4, 6, 4, lamp);
-    px(ctx, cx + 32, y + 8, 2, 8, '#8a8f9c');
-    px(ctx, cx + 29, y + 16, 8, 2, '#8a8f9c');
+    px(ctx, cx + 32, y + 8, 2, 8, '#e8dcc8');
+    px(ctx, cx + 29, y + 16, 8, 2, '#6b4a2c');
   }
 }
 
@@ -663,6 +836,75 @@ function drawCharacter(ctx, cx, cy, av, opts = {}) {
 }
 
 /** Speech / status bubble with a single glyph. */
+// ── 포도알 ──────────────────────────────────────────────────────────────────
+/**
+ * 창 하나 = 포도알 하나.
+ *
+ * 알의 색은 그 프로그램의 색이다 — 같은 프로그램이면 같은 색이라는 규칙은
+ * 사람으로 그리던 때의 배지에서 그대로 가져왔다. 모양만 바뀌고 읽는 법은
+ * 그대로다.
+ *
+ * (cx, cy) 는 알의 한가운데. 최소화된 창은 시든 것처럼 흐리게 그린다.
+ */
+export function grape(ctx, cx, cy, { hue = '#8b5cf6', asleep = false, active = false, r = 7, lift = 0 } = {}) {
+  const y = Math.round(cy - lift);
+  const skin = asleep ? darken(hue, 0.3) : hue;
+  const dark = darken(skin, 0.3);
+  const light = lighten(skin, 0.28);
+
+  ctx.save();
+  if (asleep) ctx.globalAlpha = 0.55;
+
+  // 픽셀 원 — 행마다 폭을 재서 그린다
+  for (let dy = -r; dy <= r; dy += 1) {
+    const half = Math.round(Math.sqrt(Math.max(0, r * r - dy * dy)));
+    if (!half) continue;
+    const shade = dy > r * 0.35 ? dark : skin;
+    px(ctx, cx - half, y + dy, half * 2, 1, shade);
+  }
+  // 왼쪽 위에서 오는 빛 — 이게 있어야 구슬이 아니라 알로 보인다
+  px(ctx, cx - Math.round(r * 0.55), y - Math.round(r * 0.55), 2, 2, light);
+  px(ctx, cx - Math.round(r * 0.2), y - Math.round(r * 0.7), 2, 1, light);
+  // 아래쪽 그늘
+  px(ctx, cx - 1, y + r - 1, 3, 1, dark);
+  ctx.restore();
+
+  // 지금 앞에 나와 있는 창 — 알 위에 얹힌 반짝임
+  if (active) {
+    px(ctx, cx - 1, y - r - 3, 3, 1, '#f0b45a');
+    px(ctx, cx, y - r - 4, 1, 3, '#f0b45a');
+  }
+}
+
+/** 알을 매단 짧은 꼭지. */
+export function stem(ctx, cx, top, len) {
+  px(ctx, cx, top, 1, len, '#6f8f45');
+}
+
+/**
+ * 포도알이 달리는 가지.
+ *
+ * 알이 몇 개 없을 때는 가지가 그대로 보이고, 알이 늘면 그 앞에 매달려 가지를
+ * 가린다. 그래서 가지는 알보다 **먼저** 그린다.
+ */
+export function branch(ctx, x, y, w) {
+  const BARK = '#6b4a2c';
+  px(ctx, x, y, w, 3, BARK);
+  px(ctx, x, y, w, 1, lighten(BARK, 0.22));
+  px(ctx, x, y + 2, w, 1, darken(BARK, 0.25));
+  // 끝에서 살짝 올라가는 덩굴손
+  px(ctx, x + w - 1, y - 3, 1, 4, BARK);
+  px(ctx, x + w, y - 5, 2, 2, BARK);
+  // 잎 두 장
+  const leaf = (lx, dir) => {
+    px(ctx, lx, y - 5, 6 * dir, 3, '#4d7a3e');
+    px(ctx, lx + dir, y - 7, 4 * dir, 2, '#5f9349');
+    px(ctx, lx, y - 3, 1, 3, '#5f7f3c');
+  };
+  leaf(x + 3, 1);
+  if (w > 40) leaf(x + w - 4, -1);
+}
+
 export function bubble(ctx, cx, cy, glyph, bg = '#ffffff', fg = '#2b2b33') {
   const w = 18;
   const h = 16;

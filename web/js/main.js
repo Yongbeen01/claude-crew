@@ -1153,6 +1153,9 @@ el.typesSave.addEventListener('click', async () => {
 function renderCrew() {
   // 이 아래로는 남은 게 없다 — 화면 검증이 "다 떴다" 를 물어볼 수 있게 표시해 둔다.
 window.__crewReady = true;
+// 방을 직접 그려 보게 하는 손잡이. 포도송이가 알 스무 개에서 어떻게 되는지는
+// 진짜 창 스무 개를 띄워 보지 않고는 확인할 길이 없어서 열어 둔다.
+window.__office = office;
 office.setState(store);
   const seated = store.crew.length;
   const leaving = store.crew.some((p) => p.state === 'leaving');
