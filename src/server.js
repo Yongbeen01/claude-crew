@@ -426,6 +426,10 @@ export function createServer() {
       const name = decodeURIComponent(raw ?? '');
       const job = jobs.listJobs().find((j) => j.slug === name || j.name === name);
       if (!job) return json(res, 404, { error: 'unknown job' });
+      // 목록에서 지우기. 화면에서 한 번 물어본 뒤에 온다.
+      if (!action && req.method === 'DELETE') {
+        return json(res, 200, { ok: jobs.deleteJob(job.name) });
+      }
       // The accumulated instructions are a draft the user gets to correct —
       // every future session is handed them verbatim.
       if (action === 'instructions' && req.method === 'POST') {

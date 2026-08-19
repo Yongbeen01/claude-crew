@@ -605,6 +605,56 @@ body:has(.update-bar:not([hidden])) .app { height: calc(100% - 40px); }
 .job-card small { color: var(--ink-mute); font-size: 11px; }
 .job-card.lifted { opacity: .3; transform: none; }
 
+/* 카드 오른쪽 끝의 ⋯ */
+.job-card { position: relative; }
+/* 제목이 점 셋 밑으로 흘러 들어가지 않게 */
+.job-card b, .job-card small { padding-right: 20px; }
+.card-menu { position: absolute; top: 4px; right: 4px; }
+.card-menu__dots {
+  position: relative;
+  width: 21px; height: 21px; padding: 0;
+  background: none; box-shadow: none; clip-path: none;
+  cursor: pointer;
+  transition: background var(--press);
+}
+/* 점 셋 — 글자가 아니라 네모라서 어느 폰트에서도 같게 보인다. 셋을 그림자로
+   복제해 간격을 정수로 맞춘다.
+   반투명하게 두지 않는다: 카드가 레이아웃상 반 픽셀 자리에 앉는 일이 있어
+   (측정: top 800.375) 3px 짜리가 그 위에서 번지는데, 거기에 opacity 까지
+   먹이면 점 셋이 흐린 얼룩 하나로 보인다. 색으로 조용하게 만든다. */
+.card-menu__dots::before {
+  content: '';
+  position: absolute; left: 4px; top: 9px;
+  width: 3px; height: 3px;
+  background: var(--wood);
+  box-shadow: 5px 0 0 var(--wood), 10px 0 0 var(--wood);
+}
+.card-menu__dots:hover { background: var(--paper-3); }
+.card-menu__dots:hover::before {
+  background: var(--ink);
+  box-shadow: 5px 0 0 var(--ink), 10px 0 0 var(--ink);
+}
+.card-menu__dots:active { transform: none; }
+/* 카드가 아니라 화면에 띄운다 — 상태 띠가 넘치는 것을 잘라내기 때문 */
+.card-menu__pop {
+  position: fixed; z-index: 60;
+  min-width: 92px;
+  background: var(--paper);
+  clip-path: var(--notch-sm);
+  box-shadow: inset 0 0 0 3px var(--wood-dark), 3px 3px 0 #2a1a0e40;
+  padding: 4px;
+}
+.card-menu__item {
+  display: block; width: 100%;
+  background: none; box-shadow: none; clip-path: none;
+  padding: 6px 8px;
+  text-align: left; font-size: 12px; font-weight: 700;
+  cursor: pointer;
+}
+.card-menu__item:hover { background: var(--paper-3); }
+.card-menu__item.danger { color: var(--bad-dark); }
+.card-menu__item.danger:hover { background: var(--bad); color: #fff; }
+
 #drag-layer {
   position: fixed; inset: 0;
   pointer-events: none;

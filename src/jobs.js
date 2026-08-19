@@ -73,6 +73,26 @@ export function listJobs() {
 }
 
 /**
+ * 이 일을 목록에서 지운다.
+ *
+ * 카드 하나가 아니라 그동안 쌓인 지침과 실행 기록이 같이 없어지므로, 화면에서
+ * 한 번 물어본 뒤에만 여기까지 온다. 원장(worklog.jsonl)은 건드리지 않는다 —
+ * 그건 "무슨 일을 얼마나 했는가" 의 기록이지 이 카드의 소유물이 아니다.
+ */
+export function deleteJob(name) {
+  const slug = slugify(name);
+  const dir = jobDir(slug);
+  // 슬러그를 거쳤어도 한 번 더 본다. 지우는 명령에서 경로가 밖으로 새면
+  // 되돌릴 방법이 없다.
+  if (!path.resolve(dir).startsWith(path.resolve(JOBS_DIR) + path.sep)) return false;
+  if (!fs.existsSync(dir)) return false;
+  fs.rmSync(dir, { recursive: true, force: true });
+  logActivity('job', `${name} — 자주 하는 일에서 지움`);
+  bus.emit('jobs', listJobs());
+  return true;
+}
+
+/**
  * A person finished something. Adds a run, updates the average, and — from the
  * second run on — the job becomes a draggable card.
  */

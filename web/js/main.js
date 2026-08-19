@@ -1464,6 +1464,81 @@ el.groupSave.addEventListener('click', async () => {
 });
 
 // ── saved groups ─────────────────────────────────────────────────────────
+// ── 카드 안의 ⋯ 메뉴 ─────────────────────────────────────────────────────
+/**
+ * 카드 오른쪽 끝의 점 셋. 지금은 "지우기" 하나뿐이지만, 카드를 누르는 것과
+ * 카드에 손대는 것을 갈라 두는 자리다.
+ *
+ * 카드 자체가 이미 제스처를 갖고 있다 — 일 카드는 눌러서 끌고, 저장된 그룹은
+ * 눌러서 연다. 그래서 이 버튼은 pointerdown 부터 막아야 한다. click 만 막으면
+ * 드래그는 이미 시작된 뒤다.
+ */
+let openMenu = null;
+
+function closeCardMenu() {
+  openMenu?.remove();
+  openMenu = null;
+}
+
+document.addEventListener('pointerdown', (e) => {
+  if (openMenu && !openMenu.contains(e.target)) closeCardMenu();
+}, true);
+// 화면에 띄워 둔 메뉴는 카드를 따라다니지 않는다. 카드가 움직이면 닫는 게 맞다.
+window.addEventListener('resize', closeCardMenu);
+document.addEventListener('scroll', closeCardMenu, true);
+
+function cardMenu({ label, onDelete }) {
+  const wrap = document.createElement('div');
+  wrap.className = 'card-menu';
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'card-menu__dots';
+  // 점 셋을 글자(⋯)로 쓰면 이 폰트에서 물결선처럼 뭉개진다. 픽셀 화면이니
+  // 네모 세 개를 CSS 로 직접 찍는다 (.card-menu__dots::before).
+  btn.title = '더 보기';
+  btn.setAttribute('aria-label', `${label} 더 보기`);
+
+  const stop = (e) => { e.stopPropagation(); e.preventDefault(); };
+  btn.addEventListener('pointerdown', stop);
+  btn.addEventListener('click', (e) => {
+    stop(e);
+    const mine = openMenu?.dataset.owner === label;
+    closeCardMenu();
+    if (mine) return; // 같은 걸 다시 누르면 닫기
+
+    const pop = document.createElement('div');
+    pop.className = 'card-menu__pop';
+    pop.dataset.owner = label;
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'card-menu__item danger';
+    del.textContent = '지우기';
+    del.addEventListener('pointerdown', stop);
+    del.addEventListener('click', async (ev) => {
+      stop(ev);
+      closeCardMenu();
+      await onDelete();
+    });
+    pop.appendChild(del);
+    pop.addEventListener('pointerdown', (ev) => ev.stopPropagation());
+
+    // 카드 안에 두면 패널이 잘라 버린다 — 상태 띠는 넘치는 것을 감추게 돼 있어서
+    // 메뉴가 카드 밖으로 나가는 순간 반이 사라진다. 그래서 화면 맨 위에 띄우고
+    // 버튼 위치에 맞춰 놓는다.
+    document.body.appendChild(pop);
+    const r = btn.getBoundingClientRect();
+    pop.style.top = `${Math.round(r.bottom + 4)}px`;
+    // 오른쪽 끝에 붙은 카드면 메뉴가 창 밖으로 나간다 — 안쪽으로 당긴다.
+    const w = pop.offsetWidth;
+    pop.style.left = `${Math.round(Math.max(6, Math.min(r.right - w, window.innerWidth - w - 6)))}px`;
+    openMenu = pop;
+  });
+
+  wrap.appendChild(btn);
+  return wrap;
+}
+
 function savedCard(g, { compact = true } = {}) {
   const card = document.createElement('div');
   card.className = 'job-card';
@@ -1482,6 +1557,18 @@ function savedCard(g, { compact = true } = {}) {
       : '이미 다 열려 있습니다';
     setTimeout(renderSavedGroups, 2500);
   });
+  card.appendChild(cardMenu({
+    label: g.name,
+    onDelete: async () => {
+      if (!confirm(`저장된 그룹 "${g.name}" 을(를) 지울까요?\n지금 열려 있는 창은 그대로 둡니다.`)) return;
+      await api(`/api/saved-groups/${g.id}`, { method: 'DELETE' });
+      const fresh = await api('/api/saved-groups');
+      store.savedGroups = fresh.groups ?? [];
+      renderSavedGroups();
+      // 전체 보기를 열어 둔 채 지웠으면 그쪽도 같이 줄어야 한다.
+      if (!el.savedListModal.hidden) fillSavedAll();
+    },
+  }));
   return card;
 }
 
@@ -1495,23 +1582,19 @@ function renderSavedGroups() {
   for (const g of list.slice(0, 3)) el.saved.appendChild(savedCard(g));
 }
 
-el.savedAllBtn.addEventListener('click', (e) => {
+// 지우기는 카드 안 ⋯ 메뉴로 옮겼다 — 목록에서든 전체 보기에서든 같은 자리다.
+function fillSavedAll() {
   el.savedAllList.innerHTML = '';
   for (const g of store.savedGroups ?? []) {
     const row = document.createElement('div');
     row.className = 'saved-row';
     row.appendChild(savedCard(g, { compact: false }));
-    const del = document.createElement('button');
-    del.type = 'button';
-    del.className = 'ghost tiny';
-    del.textContent = '지우기';
-    del.addEventListener('click', async () => {
-      await api(`/api/saved-groups/${g.id}`, { method: 'DELETE' });
-      el.savedAllBtn.click();
-    });
-    row.appendChild(del);
     el.savedAllList.appendChild(row);
   }
+}
+
+el.savedAllBtn.addEventListener('click', (e) => {
+  fillSavedAll();
   openSheet(el.savedListModal, e.currentTarget);
 });
 el.savedListClose.addEventListener('click', () => closeSheet(el.savedListModal));
@@ -1535,6 +1618,17 @@ function renderJobs() {
     card.addEventListener('pointerdown', (e) => startCardDrag(card, {
       kind: 'job', name: j.name, sub,
     }, e, () => openManual(j.name, card)));
+    card.appendChild(cardMenu({
+      label: j.name,
+      onDelete: async () => {
+        // 카드만 없어지는 게 아니라 그동안 쌓인 지침과 실행 기록이 같이 간다.
+        if (!confirm(`"${j.name}" 을(를) 목록에서 지울까요?\n지금까지 쌓인 지침 ${j.runCount}회분도 같이 없어집니다.`)) return;
+        await api(`/api/jobs/${encodeURIComponent(j.slug ?? j.name)}`, { method: 'DELETE' });
+        const fresh = await api('/api/jobs');
+        store.jobs = fresh.jobs ?? [];
+        renderJobs();
+      },
+    }));
     el.jobs.appendChild(card);
   }
 }
