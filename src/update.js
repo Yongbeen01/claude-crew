@@ -80,9 +80,20 @@ export async function applyUpdate() {
   if (!isGitCheckout()) {
     return { ok: false, error: 'git 체크아웃이 아니라 자동 갱신이 안 됩니다. 설치 한 줄을 다시 실행해 주세요.' };
   }
-  const dirty = (await run(gitBin(), ['status', '--porcelain'])).out.trim();
+  // 추적하는 파일이 고쳐졌을 때만 막는다.
+  //
+  // 예전에는 폴더 안에 **모르는 파일이 하나라도** 있으면 거절했다. 로그 한 장,
+  // 스크린샷 한 장이 떨어져도 그때부터 그 컴퓨터는 영영 업데이트를 못 받고,
+  // 화면에는 "직접 수정한 파일이 있습니다" 만 뜬다 — 짚어 주지도 않는다.
+  // 덮어쓸 위험이 있는 건 고쳐진 추적 파일뿐이고, 새 파일과 이름이 부딪히면
+  // 아래 merge 가 스스로 거절하며 그 이유를 말해 준다.
+  const dirty = (await run(gitBin(), ['status', '--porcelain', '--untracked-files=no'])).out.trim();
   if (dirty) {
-    return { ok: false, error: '앱 폴더에 직접 수정한 파일이 있어 덮어쓰지 않았습니다.' };
+    // 앞의 상태 두 글자와 공백을 떼어 낸다. 고정 폭으로 자르면 파일 이름이
+    // 한 글자씩 잘려 나온다 ("src/update.js" 가 "rc/update.js" 로).
+    const files = dirty.split('\n').map((l) => l.replace(/^.{2}\s+/, '').trim())
+      .filter(Boolean).slice(0, 3).join(', ');
+    return { ok: false, error: `앱 폴더에 직접 고친 파일이 있어 덮어쓰지 않았습니다: ${files}` };
   }
   // Fetch first, always.
   //
