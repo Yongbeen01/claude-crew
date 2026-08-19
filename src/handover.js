@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { DATA_DIR, config } from './config.js';
-import { claudeBin } from './tools.js';
+import { claudeArgv } from './tools.js';
 import { childEnv } from './runner.js';
 import { logActivity } from './bus.js';
 import * as jobs from './jobs.js';
@@ -131,17 +131,18 @@ function askCold(persona, body, timeoutMs) {
       instructions(persona),
     ].join('\n');
 
+    const c = claudeArgv([
+      '-p', prompt,
+      '--model', config.handoverModel,
+      '--no-session-persistence',
+      '--strict-mcp-config',
+      '--setting-sources', '',
+      '--tools', '',
+      '--settings', '{"disableAllHooks":true}',
+    ]);
     execFile(
-      claudeBin(),
-      [
-        '-p', prompt,
-        '--model', config.handoverModel,
-        '--no-session-persistence',
-        '--strict-mcp-config',
-        '--setting-sources', '',
-        '--tools', '',
-        '--settings', '{"disableAllHooks":true}',
-      ],
+      c.cmd,
+      c.args,
       { cwd: DATA_DIR, env: childEnv(), timeout: timeoutMs, windowsHide: true, maxBuffer: 1 << 22 },
       (err, stdout) => resolve(err ? null : extractJson(stdout)),
     );

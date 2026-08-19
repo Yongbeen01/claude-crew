@@ -81,6 +81,7 @@ const el = {
   files: document.getElementById('files'),
   attachments: document.getElementById('attachments'),
   openTypes: document.getElementById('open-types'),
+  authBtn: document.getElementById('auth-btn'),
   types: document.getElementById('types'),
   typeTabs: document.getElementById('type-tabs'),
   typeModel: document.getElementById('type-model'),
@@ -295,6 +296,11 @@ function connect() {
   es.addEventListener('tasks', (e) => { store.tasks = JSON.parse(e.data); renderTasks(); });
   es.addEventListener('personas', (e) => { store.personas = JSON.parse(e.data); });
   es.addEventListener('usage', (e) => { store.usage = JSON.parse(e.data); renderUsage(); });
+  es.addEventListener('auth', (e) => {
+    store.tools = { ...store.tools, auth: JSON.parse(e.data) };
+    renderAuth();
+    renderUpdate();
+  });
 
   es.addEventListener('activity', (e) => {
     store.activity = [...store.activity, JSON.parse(e.data)].slice(-120);
@@ -1469,6 +1475,68 @@ el.groupSave.addEventListener('click', async () => {
 });
 
 // ── saved groups ─────────────────────────────────────────────────────────
+// ── 클로드 계정 ──────────────────────────────────────────────────────────
+/**
+ * 로그인돼 있으면 누구인지가 버튼에 적히고, 누르면 로그아웃한다.
+ * 안 돼 있으면 "로그인" 이 적히고, 누르면 로그인 창이 뜬다.
+ *
+ * 한 자리에 두 가지 일을 두는 것은 이게 늘 **지금 상태**를 말해 주기
+ * 때문이다 — 버튼 두 개를 나란히 두면 어느 쪽이 지금인지 알 수 없다.
+ */
+function renderAuth() {
+  const a = store.tools?.auth;
+  const btn = el.authBtn;
+  if (!a || a.loggedIn === null) {           // 아직 확인 전
+    btn.textContent = '계정';
+    btn.title = '클로드 계정 확인 중…';
+    return;
+  }
+  if (a.loggedIn) {
+    // 이메일은 길다. 버튼에는 앞부분만, 전체는 툴팁에.
+    const who = (a.email || '로그인됨').split('@')[0];
+    btn.textContent = who.length > 12 ? `${who.slice(0, 12)}…` : who;
+    btn.title = `${a.email}${a.plan ? ` · ${a.plan}` : ''} — 눌러서 로그아웃`;
+    btn.classList.remove('warn');
+  } else {
+    btn.textContent = '로그인';
+    btn.title = '클로드에 로그인합니다';
+    btn.classList.add('warn');
+  }
+}
+
+el.authBtn.addEventListener('click', async () => {
+  const a = store.tools?.auth;
+  el.authBtn.disabled = true;
+  try {
+    if (a?.loggedIn) {
+      if (!confirm(`${a.email || '클로드'} 에서 로그아웃할까요?\n일하고 있는 사람들이 모두 멈춥니다.`)) return;
+      const r = await api('/api/auth', { method: 'POST', body: { action: 'logout' } });
+      if (!r.ok) alert(r.error ?? '로그아웃하지 못했습니다.');
+      if (r.auth) { store.tools = { ...store.tools, auth: r.auth }; renderAuth(); }
+    } else {
+      await api('/api/auth', { method: 'POST', body: { action: 'login' } });
+      el.authBtn.textContent = '로그인 중…';
+      // 로그인은 딴 창에서 사람이 끝낸다. 끝났는지는 물어봐야 안다.
+      await pollAuth();
+    }
+  } finally {
+    el.authBtn.disabled = false;
+    renderAuth();
+  }
+});
+
+/** 로그인 창이 끝날 때까지 상태를 물어본다. */
+async function pollAuth(timeoutMs = 180_000) {
+  const until = Date.now() + timeoutMs;
+  while (Date.now() < until) {
+    await new Promise((r) => { setTimeout(r, 3000); });
+    const a = await api('/api/auth');
+    store.tools = { ...store.tools, auth: a };
+    if (a.loggedIn) return true;
+  }
+  return false;
+}
+
 // ── 제목 옆 도움말 ───────────────────────────────────────────────────────
 /**
  * 설명을 늘 펼쳐 두면 패널의 절반이 안내문이 된다. 처음 한 번 읽고 나면 다시는
@@ -1973,6 +2041,7 @@ async function waitForServer(timeoutMs = 60_000) {
 
 function renderAll() {
   renderUpdate();
+  renderAuth();
   renderCrew();
   renderUsage();
   renderActivity();

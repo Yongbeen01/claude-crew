@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { DATA_DIR, config } from './config.js';
-import { claudeBin } from './tools.js';
+import { claudeArgv } from './tools.js';
 import { childEnv } from './runner.js';
 
 /**
@@ -66,17 +66,18 @@ function pump(apply) {
     const bits = material(person);
     if (!bits) continue;
     running += 1;
+    const c = claudeArgv([
+      '-p', prompt(bits),
+      '--model', config.summaryModel,
+      '--no-session-persistence',
+      '--strict-mcp-config',
+      '--setting-sources', '',
+      '--tools', '',
+      '--settings', '{"disableAllHooks":true}',
+    ]);
     execFile(
-      claudeBin(),
-      [
-        '-p', prompt(bits),
-        '--model', config.summaryModel,
-        '--no-session-persistence',
-        '--strict-mcp-config',
-        '--setting-sources', '',
-        '--tools', '',
-        '--settings', '{"disableAllHooks":true}',
-      ],
+      c.cmd,
+      c.args,
       { cwd: DATA_DIR, env: childEnv(), timeout: config.summaryTimeoutMs, windowsHide: true, maxBuffer: 1 << 20 },
       (err, stdout) => {
         running -= 1;

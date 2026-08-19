@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { DATA_DIR, config } from './config.js';
-import { claudeBin } from './tools.js';
+import { claudeArgv } from './tools.js';
 import { bus } from './bus.js';
 import { childEnv } from './runner.js';
 
@@ -55,15 +55,30 @@ export function usageReport() {
 export function refreshUsage() {
   if (running || !config.usage) return latest;
   running = true;
+  try {
+    return spawnUsage();
+  } catch (err) {
+    // 여기서 던지면 부팅 중이던 앱이 통째로 죽는다. 한도 표시는 편의지
+    // 앱이 서 있어야 할 이유가 아니다.
+    running = false;
+    latest = { ...latest, stale: true, error: String(err?.message ?? err).slice(0, 120) };
+    bus.emit('usage', latest);
+    return latest;
+  }
+}
+
+function spawnUsage() {
+  // claude 가 .cmd 껍데기인 컴퓨터도 있다 — claudeArgv 가 그걸 가려 준다.
+  const c = claudeArgv([
+    '-p', '/usage',
+    '--model', config.summaryModel,
+    '--no-session-persistence',
+    '--strict-mcp-config',
+    '--settings', '{"disableAllHooks":true}',
+  ]);
   execFile(
-    claudeBin(),
-    [
-      '-p', '/usage',
-      '--model', config.summaryModel,
-      '--no-session-persistence',
-      '--strict-mcp-config',
-      '--settings', '{"disableAllHooks":true}',
-    ],
+    c.cmd,
+    c.args,
     { cwd: DATA_DIR, env: childEnv(), timeout: config.usageTimeoutMs, windowsHide: true, maxBuffer: 1 << 20 },
     (err, stdout) => {
       running = false;

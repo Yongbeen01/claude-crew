@@ -13,7 +13,7 @@ import * as approvals from './approvals.js';
 import * as savedGroups from './savedGroups.js';
 import { updateStatus, checkForUpdate, applyUpdate, restartApp } from './update.js';
 import { toolboxStatus } from './toolbox.js';
-import { toolsStatus } from './tools.js';
+import { toolsStatus, authLogin, authLogout, refreshAuth } from './tools.js';
 import { desktopState, focusPerson, refreshDesktop } from './desktop.js';
 import * as groups from './groups.js';
 
@@ -58,6 +58,7 @@ bus.on('approvals', (a) => broadcast('approvals', a));
 bus.on('approval-resolved', (a) => broadcast('approval-resolved', a));
 bus.on('update', (u) => broadcast('update', u));
 bus.on('toolbox', (t) => broadcast('toolbox', t));
+bus.on('auth', (a) => broadcast('auth', a));
 // 대화창이 '생각 중 → 도구 → 답변' 을 그릴 수 있게 하는 신호들.
 // 이 컴퓨터에 열려 있는 창들, 그리고 그 창들을 묶은 그룹.
 bus.on('desktop', (d) => broadcast('desktop', d));
@@ -445,6 +446,27 @@ export function createServer() {
     }
 
     if (p === '/api/tasks') return json(res, 200, timers.publicState());
+
+    // ---- 클로드 계정 --------------------------------------------------------
+    if (p === '/api/auth') {
+      if (req.method === 'POST') {
+        const body = await readBody(req);
+        if (body.action === 'login') {
+          // 브라우저를 띄우고 사람이 끝낼 때까지 기다리는 일이라, 여기서
+          // 기다리지 않는다. 화면이 주기적으로 상태를 다시 물어본다.
+          authLogin();
+          logActivity('auth', '클로드 로그인 창을 열었습니다');
+          return json(res, 200, { ok: true, started: true });
+        }
+        if (body.action === 'logout') {
+          const r = await authLogout();
+          logActivity(r.ok ? 'auth' : 'error', r.ok ? '클로드에서 로그아웃했습니다' : `로그아웃 실패 — ${r.error}`);
+          return json(res, r.ok ? 200 : 400, r);
+        }
+        return json(res, 400, { ok: false, error: 'unknown action' });
+      }
+      return json(res, 200, await refreshAuth());
+    }
 
     // ---- self update -------------------------------------------------------
     if (p === '/api/update') {
