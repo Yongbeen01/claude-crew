@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { DATA_DIR, config } from './config.js';
+import { claudeBin } from './tools.js';
 import { bus } from './bus.js';
 import { childEnv } from './runner.js';
 
@@ -55,7 +56,7 @@ export function refreshUsage() {
   if (running || !config.usage) return latest;
   running = true;
   execFile(
-    config.claudeBin,
+    claudeBin(),
     [
       '-p', '/usage',
       '--model', config.summaryModel,

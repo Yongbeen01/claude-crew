@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { DATA_DIR, config } from './config.js';
+import { claudeBin } from './tools.js';
 import { childEnv } from './runner.js';
 import { logActivity } from './bus.js';
 import * as jobs from './jobs.js';
@@ -131,7 +132,7 @@ function askCold(persona, body, timeoutMs) {
     ].join('\n');
 
     execFile(
-      config.claudeBin,
+      claudeBin(),
       [
         '-p', prompt,
         '--model', config.handoverModel,

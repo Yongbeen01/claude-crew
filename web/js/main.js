@@ -26,6 +26,8 @@ const store = {
   /** 창을 다 닫은 뒤에도 남는 그룹 — 다시 열기 위한 레시피 */
   savedGroups: [],
   meta: { maxSeats: 4, models: [], efforts: [] },
+  /** claude·git 을 찾았는지 — 못 찾았으면 화면이 그 사실을 먼저 말한다 */
+  tools: null,
   /** personId -> [{role, text, at}] */
   chats: new Map(),
   /** personId -> partial assistant text */
@@ -277,7 +279,7 @@ function connect() {
       crew: s.crew, personas: s.personas, activity: s.activity, approvals: s.approvals,
       jobs: s.jobs, tasks: s.tasks, system: s.system, usage: s.usage, meta: s.meta,
       update: s.update, desktop: s.desktop ?? store.desktop, groups: s.groups ?? [],
-      savedGroups: s.savedGroups ?? [],
+      savedGroups: s.savedGroups ?? [], tools: s.tools ?? store.tools,
     });
     el.version.textContent = `v${s.meta?.version ?? ''}`;
     renderAll();
@@ -1892,9 +1894,40 @@ let updateDismissed = false;
 
 function renderUpdate() {
   const u = store.update;
+
+  /**
+   * 클로드를 못 찾는 것이 무엇보다 먼저다.
+   *
+   * 그 상태에서는 세션이 뜨자마자 죽어 "종료됨" 으로 보이고 남은 한도 칸이
+   * 비는데, 쓰는 사람 눈에는 로그아웃된 것처럼 보인다. 원인을 화면이 직접
+   * 말해 주지 않으면 알아낼 방법이 없다.
+   */
+  if (store.tools && !store.tools.claude?.found) {
+    el.updateBar.hidden = false;
+    el.updateApply.hidden = true;
+    el.updateHide.hidden = true;
+    el.updateText.textContent = 'Claude Code 를 찾지 못했습니다 — 그래서 사람을 불러도 바로 종료되고 '
+      + '남은 한도도 안 보입니다. PowerShell 에서 설치 한 줄을 다시 실행해 주세요.';
+    return;
+  }
+  el.updateApply.hidden = false;
+  el.updateHide.hidden = false;
+
+  // git 이 없으면 자동 갱신 자체가 불가능하다. 조용히 아무 일도 안 하는 대신
+  // 그렇다고 말한다 — 예전에는 이 경우 띠가 영영 안 떠서, 새 버전을 내도
+  // 받는 쪽은 아무것도 모르고 있었다.
+  if (u && !u.git) {
+    el.updateBar.hidden = updateDismissed;
+    el.updateApply.hidden = true;
+    el.updateText.textContent = '이 설치본은 자동 업데이트를 못 받습니다(git 없이 받은 압축본). '
+      + '새 버전을 받으려면 설치 한 줄을 다시 실행해 주세요.';
+    return;
+  }
+
   el.updateBar.hidden = !u?.behind || updateDismissed;
   if (el.updateBar.hidden) return;
-  el.updateText.textContent = '새 버전이 있습니다. 받아서 다시 시작하면 적용됩니다 — 업무 이력과 유형 설정은 그대로 남습니다.';
+  el.updateText.textContent = '새 버전이 있습니다. 받기를 누르면 받아서 자동으로 다시 시작합니다 — '
+    + '업무 이력과 유형 설정은 그대로 남습니다.';
 }
 
 el.updateHide.addEventListener('click', () => { updateDismissed = true; renderUpdate(); });
@@ -1903,14 +1936,40 @@ el.updateApply.addEventListener('click', async () => {
   el.updateApply.disabled = true;
   el.updateText.textContent = '받는 중…';
   const r = await api('/api/update', { method: 'POST' });
-  el.updateApply.disabled = false;
-  if (r.ok) {
-    el.updateText.textContent = '받았습니다. 바탕화면 아이콘으로 다시 시작하면 적용됩니다.';
-    el.updateApply.hidden = true;
-  } else {
+  if (!r.ok) {
+    el.updateApply.disabled = false;
     el.updateText.textContent = r.error ?? '업데이트하지 못했습니다.';
+    return;
   }
+  el.updateApply.hidden = true;
+  if (!r.restarting) {
+    el.updateText.textContent = '받았습니다. 바탕화면 아이콘으로 다시 시작하면 적용됩니다.';
+    return;
+  }
+  // 앱이 스스로 다시 켜는 중이다. 예전에는 여기서 "다시 시작하세요" 라고만
+  // 하고 끝냈는데, 그 말을 따르지 않으면 화면은 그대로라 받은 사람 눈에는
+  // 업데이트가 안 된 것으로 보였다. 서버가 돌아오면 우리가 새로고침한다.
+  el.updateText.textContent = '다시 시작하는 중… 잠시만요.';
+  await waitForServer();
+  location.reload();
 });
+
+/** 서버가 다시 뜰 때까지. 못 뜨면 사람이 아이콘으로 켤 수 있게 말해 준다. */
+async function waitForServer(timeoutMs = 60_000) {
+  const until = Date.now() + timeoutMs;
+  // 먼저 죽는 것을 기다린다 — 아직 살아 있는 옛 프로세스를 보고 곧장
+  // 새로고침하면 옛 코드를 다시 받는다.
+  await new Promise((r) => { setTimeout(r, 2500); });
+  while (Date.now() < until) {
+    try {
+      const res = await fetch('/healthz', { cache: 'no-store' });
+      if (res.ok) return true;
+    } catch { /* 아직 안 떴다 */ }
+    await new Promise((r) => { setTimeout(r, 1000); });
+  }
+  el.updateText.textContent = '다시 시작하지 못했습니다. 바탕화면 아이콘으로 열어 주세요.';
+  return false;
+}
 
 function renderAll() {
   renderUpdate();

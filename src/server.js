@@ -11,8 +11,9 @@ import * as timers from './timers.js';
 import { handle as handleMcp, personIdForToken } from './mcpServer.js';
 import * as approvals from './approvals.js';
 import * as savedGroups from './savedGroups.js';
-import { updateStatus, checkForUpdate, applyUpdate } from './update.js';
+import { updateStatus, checkForUpdate, applyUpdate, restartApp } from './update.js';
 import { toolboxStatus } from './toolbox.js';
+import { toolsStatus } from './tools.js';
 import { desktopState, focusPerson, refreshDesktop } from './desktop.js';
 import * as groups from './groups.js';
 
@@ -121,6 +122,9 @@ function fullState() {
     approvalHistory: approvals.approvalHistory(),
     update: updateStatus(),
     toolbox: toolboxStatus(),
+    // claude·git 을 찾았는지. 못 찾았을 때 화면이 "로그아웃 된 것 같다" 가
+    // 아니라 무엇이 없는지 말할 수 있어야 한다.
+    tools: toolsStatus(),
     desktop: desktopState(),
     groups: groups.listGroups(),
     savedGroups: savedGroups.listSaved(),
@@ -446,7 +450,10 @@ export function createServer() {
     if (p === '/api/update') {
       if (req.method === 'POST') {
         const result = await applyUpdate();
-        return json(res, result.ok ? 200 : 400, result);
+        // 받기만 하고 멈추면 돌고 있는 것은 여전히 옛 코드다. 답을 보낸 뒤
+        // 스스로 다시 켠다 — 화면은 서버가 돌아오면 알아서 새로고침한다.
+        const restarting = result.ok ? restartApp() : false;
+        return json(res, result.ok ? 200 : 400, { ...result, restarting });
       }
       if (url.searchParams.get('check') === '1') return json(res, 200, await checkForUpdate());
       return json(res, 200, updateStatus());

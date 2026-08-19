@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config, SESSIONS_DIR } from './config.js';
 import { equipTools, linkInto } from './toolbox.js';
+import { claudeBin } from './tools.js';
 
 const isWin = process.platform === 'win32';
 
@@ -202,7 +203,10 @@ export class Runner extends EventEmitter {
   }
 
   _spawn(args, { viaShell }) {
-    const bin = config.claudeBin;
+    // PATH 가 아니라 우리가 찾아 둔 절대 경로로 부른다. 남의 컴퓨터에서는
+    // 바탕화면 아이콘으로 켰을 때 PATH 에 claude 가 없어서, 세션이 뜨자마자
+    // 죽고 화면에는 "종료됨" 만 남았다.
+    const bin = claudeBin();
     const base = {
       cwd: this.workdir,
       env: childEnv(),

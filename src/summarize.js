@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { DATA_DIR, config } from './config.js';
+import { claudeBin } from './tools.js';
 import { childEnv } from './runner.js';
 
 /**
@@ -66,7 +67,7 @@ function pump(apply) {
     if (!bits) continue;
     running += 1;
     execFile(
-      config.claudeBin,
+      claudeBin(),
       [
         '-p', prompt(bits),
         '--model', config.summaryModel,
