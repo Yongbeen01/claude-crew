@@ -1,5 +1,5 @@
 import {
-  px, floorPatch, rug, room, mushroom,
+  px, floorPatch, rug, room, mushroom, tree,
   plant, chair, desk, emptyDesk, character, bubble, avatarOf,
   door, zoneFloor, partition, orchardFloor, fence, grape, stem, branch,
 } from './sprites.js';
@@ -549,6 +549,20 @@ export class Office {
         (g.win.y + g.zoneH + 4) - (g.win.looseTop - BAND_GAP / 2), '#a77bd8');
       partition(ctx, g.divider.x, g.divider.y, g.divider.h);
       this._dressWindows(ctx, g);
+    }
+
+    // 아래쪽 빈 띠에도 나무를 세운다. 사람도 알도 이 아래로는 오지 않으므로
+    // 여기서는 나무가 내용을 가리지 않는다 — 가릴 자리에는 두지 않았다.
+    const treeLine = h - 4;
+    const jitter = (v) => ((Math.imul(v, 2654435761) >>> 8) % 1000) / 1000;
+    // 뒷줄 먼저, 그 앞을 큰 나무가 덮는다
+    for (let tx = 6; tx < w; tx += 22 + Math.round(jitter(tx + 91) * 16)) {
+      if (tx < g.door.x - 42) tree(ctx, tx, treeLine - 8, 8 + Math.round(jitter(tx + 91) * 5), tx * 3);
+    }
+    for (let tx = 14; tx < w; tx += 26 + Math.round(jitter(tx) * 26)) {
+      // 문 앞은 비워 둔다 — 나가는 길을 나무로 막지 않는다
+      const n = jitter(tx);
+      if (tx < g.door.x - 42) tree(ctx, tx, treeLine + Math.round(n * 4), 12 + Math.round(n * 9), tx * 5);
     }
 
     // 숲 바닥에 놓인 것들

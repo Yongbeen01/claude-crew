@@ -86,6 +86,78 @@ function noise(x, y) {
   return (n >>> 8) / 0x1000000;
 }
 
+/** 픽셀 원. 수관 덩어리와 포도알이 같은 방식으로 그려진다. */
+function disc(ctx, cx, cy, r, color) {
+  for (let dy = -r; dy <= r; dy += 1) {
+    const half = Math.round(Math.sqrt(Math.max(0, r * r - dy * dy)));
+    if (half) px(ctx, cx - half, cy + dy, half * 2, 1, color);
+  }
+}
+
+/** 풀포기. 가운데 한 날 옆으로 두 날 — 이 화면의 풀은 이 모양이다. */
+export function tuft(ctx, x, y, color = '#6aa83f') {
+  px(ctx, x, y - 2, 1, 4, color);
+  px(ctx, x - 2, y, 1, 2, color);
+  px(ctx, x + 2, y - 1, 1, 3, color);
+}
+
+/**
+ * 나무 한 그루.
+ *
+ * 수관은 원 하나가 아니라 덩어리 다섯이 겹친 것이다 — 원 하나로 그리면 나무가
+ * 아니라 브로콜리가 된다. 겹친 덩어리를 네 겹으로 칠한다: 윤곽 → 아랫면 →
+ * 중간톤 → 빛 받는 윗면. 빛은 늘 왼쪽 위에서 온다.
+ *
+ * (cx, cy) 는 나무가 땅에 닿는 지점.
+ */
+export function tree(ctx, cx, cy, r = 15, seed = 0) {
+  const OUT = '#24491f';
+  const DARK = '#35692a';
+  const MID = '#4e8c35';
+  const LIT = '#6aa83f';
+  const TOP = '#82c452';
+  const TRUNK = '#5a4126';
+  const TRUNK_L = '#6e5231';
+  const TRUNK_D = '#3f2d19';
+
+  const th = Math.max(6, Math.round(r * 0.85));
+  const tw = Math.max(4, Math.round(r * 0.42));
+  const hw = Math.round(tw / 2);
+
+  ctx.save();
+  ctx.globalAlpha = 0.2;
+  disc(ctx, cx, cy - 1, Math.round(r * 0.7), '#000000');
+  ctx.restore();
+
+  // 몸통과 드러난 뿌리
+  px(ctx, cx - hw, cy - th, tw, th, TRUNK);
+  px(ctx, cx - hw, cy - th, 1, th, TRUNK_L);
+  px(ctx, cx + hw - 1, cy - th, 1, th, TRUNK_D);
+  px(ctx, cx - hw - 2, cy - 3, 2, 3, TRUNK);
+  px(ctx, cx + hw, cy - 3, 2, 3, TRUNK);
+  px(ctx, cx - hw - 4, cy - 2, 2, 2, TRUNK_D);
+  px(ctx, cx + hw + 2, cy - 2, 2, 2, TRUNK_D);
+
+  const top = cy - th - Math.round(r * 0.45);
+  // 덩어리마다 조금씩 어긋나게 — 같은 자리에 같은 크기로 얹으면 모든 나무가
+  // 똑같이 생긴 공이 되어 숲이 아니라 가로수가 된다.
+  const j = (k, amt) => Math.round((noise(seed + k * 37, k * 11) - 0.5) * 2 * amt);
+  const lobes = [
+    [cx + j(1, r * 0.12), top - Math.round(r * 0.25) + j(2, r * 0.1), r + j(3, r * 0.12)],
+    [cx - Math.round(r * 0.72) + j(4, r * 0.14), top + Math.round(r * 0.18) + j(5, r * 0.12), Math.round(r * 0.7) + j(6, r * 0.14)],
+    [cx + Math.round(r * 0.72) + j(7, r * 0.14), top + Math.round(r * 0.18) + j(8, r * 0.12), Math.round(r * 0.7) + j(9, r * 0.14)],
+    [cx - Math.round(r * 0.32) + j(10, r * 0.12), top + Math.round(r * 0.52), Math.round(r * 0.6) + j(11, r * 0.12)],
+    [cx + Math.round(r * 0.32) + j(12, r * 0.12), top + Math.round(r * 0.52), Math.round(r * 0.6) + j(13, r * 0.12)],
+  ];
+  for (const [lx, ly, lr] of lobes) disc(ctx, lx, ly, lr + 1, OUT);
+  for (const [lx, ly, lr] of lobes) disc(ctx, lx, ly, lr, DARK);
+  for (const [lx, ly, lr] of lobes) {
+    disc(ctx, lx, ly - Math.max(1, Math.round(lr * 0.2)), lr - 1, MID);
+  }
+  disc(ctx, cx - Math.round(r * 0.22), top - Math.round(r * 0.48), Math.round(r * 0.55), LIT);
+  disc(ctx, cx - Math.round(r * 0.42), top - Math.round(r * 0.6), Math.round(r * 0.28), TOP);
+}
+
 /** 이끼 낀 숲 바닥. 흙이 드러난 자리와 풀포기가 섞인다. */
 export function floorPatch(ctx, x, y, w, h) {
   px(ctx, x, y, w, h, MOSS_A);
@@ -103,12 +175,8 @@ export function floorPatch(ctx, x, y, w, h) {
         const pw = 8 + Math.floor(n * 14);
         px(ctx, x + gx + 2, y + gy + 3, pw, 4, DIRT);
         px(ctx, x + gx + 3, y + gy + 3, pw - 3, 1, lighten(DIRT, 0.1));
-      } else if (n < 0.2) {
-        // 풀포기 셋
-        const c = lighten(MOSS_A, 0.18);
-        px(ctx, x + gx + 4, y + gy + 4, 1, 4, c);
-        px(ctx, x + gx + 6, y + gy + 2, 1, 6, c);
-        px(ctx, x + gx + 8, y + gy + 5, 1, 3, c);
+      } else if (n < 0.34) {
+        tuft(ctx, x + gx + 6, y + gy + 5, n < 0.16 ? '#6aa83f' : '#5c9436');
       }
     }
   }
@@ -130,9 +198,9 @@ export function orchardFloor(ctx, x, y, w, h, tint) {
     px(ctx, x, y + i + 2, w, 1, '#6a8a4c');
   }
   // 밭에 드문드문 난 풀
-  for (let gx = 0; gx < w; gx += 14) {
+  for (let gx = 0; gx < w; gx += 13) {
     const n = noise(gx + x, y);
-    if (n > 0.6) px(ctx, x + gx + 3, y + 3 + Math.floor(n * (h - 8)), 1, 3, '#7fa055');
+    if (n > 0.5) tuft(ctx, x + gx + 4, y + 5 + Math.floor(n * (h - 12)), '#7fb84c');
   }
 }
 
@@ -148,31 +216,42 @@ export function fence(ctx, x, y, w, h) {
   const RAIL = '#8a6a45';
   const POST_H = 9;
 
-  // 기둥은 **테두리에만** 짧게 선다. 밭을 가로질러 세우면 울타리가 아니라
-  // 창살이 된다 — 처음에 그렇게 그려 놓고 화면을 보고서야 알았다.
-  const posts = (ry) => {
+  // 자로 그은 네모가 아니라 손으로 두른 울타리 — 가로대가 물결친다.
+  // 위·아래의 위상을 어긋나게 둬서 두 줄이 나란히 굽지 않게 한다.
+  const AMP = 3;
+  const PERIOD = 58;
+  const wave = (i, phase) => Math.round(Math.sin((i / PERIOD) * Math.PI * 2 + phase) * AMP);
+
+  /** 가로 가로대 — 한 픽셀씩 굽은 선을 따라간다. */
+  const railH = (baseY, phase, dir) => {
+    for (let i = 0; i < w; i += 1) {
+      const yy = baseY + wave(i, phase);
+      px(ctx, x + i, yy, 1, 2, RAIL);
+      px(ctx, x + i, yy, 1, 1, lighten(RAIL, 0.16));
+    }
+    // 기둥은 굽은 선 위에 선다
     for (let i = 0; i <= w - 3; i += 26) {
-      const pxx = x + i;
-      px(ctx, pxx, ry - POST_H + 2, 3, POST_H, POST);
-      px(ctx, pxx + 2, ry - POST_H + 2, 1, POST_H, POST_D);
-      px(ctx, pxx, ry - POST_H + 2, 3, 1, lighten(POST, 0.22));
+      const yy = baseY + wave(i, phase);
+      const py = dir > 0 ? yy - POST_H + 2 : yy;
+      px(ctx, x + i, py, 3, POST_H, POST);
+      px(ctx, x + i + 2, py, 1, POST_H, POST_D);
+      px(ctx, x + i, py, 3, 1, lighten(POST, 0.22));
     }
   };
-  const railH = (ry) => {
-    px(ctx, x, ry, w, 2, RAIL);
-    px(ctx, x, ry, w, 1, lighten(RAIL, 0.16));
-  };
-  const railV = (rx) => {
-    px(ctx, rx, y, 2, h, RAIL);
-    px(ctx, rx, y, 1, h, lighten(RAIL, 0.12));
+
+  /** 세로 가로대 — 같은 물결을 옆으로 눕힌다. */
+  const railV = (baseX, phase) => {
+    for (let i = 0; i < h; i += 1) {
+      const xx = baseX + wave(i, phase);
+      px(ctx, xx, y + i, 2, 1, RAIL);
+      px(ctx, xx, y + i, 1, 1, lighten(RAIL, 0.12));
+    }
   };
 
-  posts(y + 2);
-  posts(y + h);
-  railH(y);
-  railH(y + h - 2);
-  railV(x);
-  railV(x + w - 2);
+  railH(y, 0, 1);
+  railH(y + h - 2, Math.PI * 0.75, -1);
+  railV(x, Math.PI * 0.35);
+  railV(x + w - 2, Math.PI * 1.25);
 }
 
 /** Area rug under a workstation: solid field, darker border, woven edge. */
@@ -206,19 +285,16 @@ export function room(ctx, x, y, w, h, wallTop, wall) {
   px(ctx, x, y, w, wallTop, CANOPY);
   px(ctx, x, y, w, Math.round(wallTop * 0.45), DEEP);
 
-  // 나무들. 자리는 좌표에서 뽑으므로 프레임마다 흔들리지 않는다.
+  // 뒤쪽에 서 있는 잔가지들 — 나무를 놓기 전 밑그림
   for (let i = 6; i < w - 6; i += 34) {
     const n = noise(i, 7);
-    const tw = 5 + Math.round(n * 4);
-    const th = Math.round(wallTop * (0.55 + n * 0.4));
+    const tw = 4 + Math.round(n * 3);
+    const th = Math.round(wallTop * (0.5 + n * 0.35));
     const tx = x + i + Math.round(n * 8);
     px(ctx, tx, y + wallTop - th, tw, th, TRUNK);
     px(ctx, tx, y + wallTop - th, 1, th, TRUNK_L);
-    // 가지에 걸린 잎
-    px(ctx, tx - 4, y + wallTop - th - 2, tw + 8, 4, BUSH);
-    px(ctx, tx - 2, y + wallTop - th - 5, tw + 4, 3, lighten(BUSH, 0.1));
-    // 마법의 숲인 이유 — 나무 사이에 떠 있는 빛
     if (n > 0.62) {
+      // 마법의 숲인 이유 — 나무 사이에 떠 있는 빛
       ctx.save();
       ctx.globalAlpha = 0.5;
       px(ctx, tx + tw + 3, y + wallTop - Math.round(th * 0.6), 2, 2, GLOW);
@@ -226,10 +302,23 @@ export function room(ctx, x, y, w, h, wallTop, wall) {
     }
   }
 
+  // 나무는 두 줄로 심는다. 뒷줄은 작고 위에 서서 깊이를 만들고, 앞줄이 그
+  // 위를 덮는다. 간격·크기·모양을 전부 흔들어야 가로수길이 아니라 숲이 된다.
+  for (let i = -6; i < w + 6;) {
+    const n = noise(i, 41);
+    tree(ctx, x + i, y + wallTop - 8 + Math.round(n * 4), 9 + Math.round(n * 5), i * 3 + 5);
+    i += 26 + Math.round(n * 18);
+  }
+  for (let i = 2; i < w + 6;) {
+    const n = noise(i, 3);
+    tree(ctx, x + i, y + wallTop + 2 + Math.round(n * 6), 13 + Math.round(n * 10), i * 7);
+    i += 24 + Math.round(n * 26);
+  }
+
   // 숲과 땅이 만나는 선 — 덤불
   for (let i = 0; i < w; i += 7) {
     const n = noise(i, 21);
-    px(ctx, x + i, y + wallTop - 4 - Math.round(n * 3), 7, 6 + Math.round(n * 3), BUSH);
+    px(ctx, x + i, y + wallTop - 3 - Math.round(n * 3), 7, 5 + Math.round(n * 3), BUSH);
   }
   px(ctx, x, y + wallTop, w, 1, '#2b4523');
 
@@ -567,16 +656,18 @@ export function roundTable(ctx, cx, cy, r, color = '#8a6f5a') {
  * area is bounded" without drawing a box around it.
  */
 export function zoneFloor(ctx, x, y, w, h, tint) {
+  // 예전에는 0.34 로 덮어 구역을 갈랐는데, 바닥이 널판일 때는 그래도 됐지만
+  // 이끼와 풀 위에서는 그 밑의 결을 통째로 눌러 버려 빈터가 죽은 판때기가 됐다.
   ctx.save();
-  ctx.globalAlpha = 0.34;
+  ctx.globalAlpha = 0.12;
   px(ctx, x, y, w, h, '#2a2018');
   ctx.restore();
   ctx.save();
-  ctx.globalAlpha = 0.2;
+  ctx.globalAlpha = 0.14;
   px(ctx, x, y, w, h, tint);
   ctx.restore();
   ctx.save();
-  ctx.globalAlpha = 0.08;
+  ctx.globalAlpha = 0.06;
   for (let i = 4; i < h; i += 8) px(ctx, x, y + i, w, 1, '#000000');
   ctx.restore();
   ctx.save();
