@@ -1464,6 +1464,74 @@ el.groupSave.addEventListener('click', async () => {
 });
 
 // ── saved groups ─────────────────────────────────────────────────────────
+// ── 제목 옆 도움말 ───────────────────────────────────────────────────────
+/**
+ * 설명을 늘 펼쳐 두면 패널의 절반이 안내문이 된다. 처음 한 번 읽고 나면 다시는
+ * 안 읽는 글이므로 ? 뒤로 접었다.
+ *
+ * 말풍선은 패널 안이 아니라 화면에 띄운다 — 상태 띠는 넘치는 것을 잘라내게 돼
+ * 있어서(카드 메뉴에서 같은 데 걸렸다) 패널 안에 두면 긴 설명이 잘린다.
+ */
+let helpTip = null;
+
+function hideHelp() {
+  helpTip?.remove();
+  helpTip = null;
+}
+
+/** 말풍선을 지금 버튼 자리에 맞춘다. 버튼이 사라졌으면 말풍선도 거둔다. */
+function placeHelp() {
+  const btn = helpTip?.anchor;
+  if (!btn?.isConnected) return hideHelp();
+  const r = btn.getBoundingClientRect();
+  const w = helpTip.offsetWidth;
+  // 화면 끝에 붙은 패널이면 말풍선이 밖으로 나간다 — 안쪽으로 당긴다.
+  helpTip.style.left = `${Math.round(Math.max(6, Math.min(r.left - 6, window.innerWidth - w - 6)))}px`;
+  // 아래가 좁으면 버튼 위로 올린다.
+  const below = r.bottom + 6;
+  helpTip.style.top = below + helpTip.offsetHeight > window.innerHeight - 6
+    ? `${Math.round(Math.max(6, r.top - helpTip.offsetHeight - 6))}px`
+    : `${Math.round(below)}px`;
+  return undefined;
+}
+
+function showHelp(btn) {
+  if (helpTip?.anchor === btn) return;
+  hideHelp();
+  const text = btn.dataset.help;
+  if (!text) return;
+  const tip = document.createElement('div');
+  tip.className = 'help-tip';
+  tip.setAttribute('role', 'tooltip');
+  tip.textContent = text;
+  tip.anchor = btn;
+  document.body.appendChild(tip);
+  helpTip = tip;
+  placeHelp();
+}
+
+// 위임: 패널은 나타났다 사라졌다 하므로 버튼마다 매다는 것은 의미가 없다.
+document.addEventListener('pointerover', (e) => {
+  const btn = e.target.closest?.('.help');
+  if (btn) showHelp(btn);
+  else if (helpTip && !e.target.closest?.('.help-tip')) hideHelp();
+});
+document.addEventListener('focusin', (e) => {
+  const btn = e.target.closest?.('.help');
+  if (btn) showHelp(btn);
+});
+document.addEventListener('focusout', (e) => { if (e.target.closest?.('.help')) hideHelp(); });
+// 손가락으로는 hover 가 없다 — 눌러도 보이게.
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest?.('.help');
+  if (btn) { e.preventDefault(); showHelp(btn); }
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideHelp(); });
+// 상태 띠는 가로로 스크롤된다. 그때 말풍선을 지우면, 버튼을 겨누느라 띠가
+// 조금 밀리기만 해도 설명이 사라진다 — 지우지 말고 따라가게 한다.
+window.addEventListener('resize', placeHelp);
+document.addEventListener('scroll', placeHelp, true);
+
 // ── 카드 안의 ⋯ 메뉴 ─────────────────────────────────────────────────────
 /**
  * 카드 오른쪽 끝의 점 셋. 지금은 "지우기" 하나뿐이지만, 카드를 누르는 것과
