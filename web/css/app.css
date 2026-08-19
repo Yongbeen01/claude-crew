@@ -197,7 +197,8 @@ body:has(.update-bar:not([hidden])) .app { height: calc(100% - 40px); }
   height: 100%;
   display: grid;
   grid-auto-flow: column;
-  /* 칸의 폭은 판때기 자신이 정한다(--panel-w). 트랙을 minmax(232px, 1fr) 로
+  /* 칸의 폭은 판때기 자신이 정한다(아래 --panel-base × --panel-scale).
+     트랙을 minmax(232px, 1fr) 로
      두면 트랙은 232 인데 판때기만 넓어져서 옆 칸 위로 120px 씩 겹쳐 올라탔다 —
      겹친 자리에서는 뒤에 그려진 이웃이 클릭을 다 가져갔다. */
   grid-auto-columns: auto;
@@ -211,11 +212,13 @@ body:has(.update-bar:not([hidden])) .app { height: calc(100% - 40px); }
      scrollIntoView 까지 전부 애니메이션이 돼서, 어떤 요소도 "멈춰 있는" 순간이
      없어진다 — 클릭 대상이 계속 움직인다. */
 }
-/* 폭은 칸마다 따로 정해진다 — 담긴 것이 다르기 때문이다. 사용자가 끌어서
- * 바꾼 값은 그 칸의 --panel-w 로 남고 다음에도 그대로 열린다. */
-.deck > .panel { width: var(--panel-w, 232px); }
-.deck > #today-panel { --panel-w: 474px; }
-.deck > #windows-panel { --panel-w: 474px; }
+/* 칸 폭 = 창에 비례하는 기준(--panel-base, main.js 가 띠 너비에서 계산) ×
+ * 그 칸의 배수(--panel-scale). 끌어서 바꾸면 px 가 아니라 배수로 남으므로,
+ * 창을 키우면 내가 넓혀 둔 칸도 같이 넓어진다. */
+.deck > .panel { width: calc(var(--panel-base, 232px) * var(--panel-scale, 1)); }
+/* 담긴 것이 다르다 — 오늘 할 일과 열린 창 목록은 두 칸 몫이 필요하다. */
+.deck > #today-panel { --panel-scale: 2; }
+.deck > #windows-panel { --panel-scale: 2; }
 
 /* 오른쪽 모서리를 잡고 끌면 그 칸만 넓어진다. 평소엔 테두리와 구분되지 않다가
  * 손이 오면 드러난다. */
@@ -644,6 +647,9 @@ body:has(.update-bar:not([hidden])) .app { height: calc(100% - 40px); }
   position: relative;
   width: 21px; height: 21px; padding: 0;
   background: none; box-shadow: none; clip-path: none;
+  /* 버튼의 기본 그림자를 끈다. 판때기에는 어울리지만 바탕 없는 버튼에서는
+     그림자가 글리프 자체에 얹혀서 점 셋이 여섯 개로 번져 보인다. */
+  filter: none;
   cursor: pointer;
   transition: background var(--press);
 }
@@ -677,6 +683,8 @@ body:has(.update-bar:not([hidden])) .app { height: calc(100% - 40px); }
 .card-menu__item {
   display: block; width: 100%;
   background: none; box-shadow: none; clip-path: none;
+  /* 바탕이 없으니 그림자가 글자에 그대로 얹힌다 — 껐다. */
+  filter: none;
   padding: 6px 8px;
   text-align: left; font-size: 12px; font-weight: 700;
   cursor: pointer;

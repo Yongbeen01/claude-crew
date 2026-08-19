@@ -2009,15 +2009,43 @@ deckResizer.addEventListener('keydown', (e) => {
  */
 const PANEL_KEY = 'crew.panelWidths';
 
-function readPanelWidths() {
+/**
+ * 기준 폭은 창을 따라간다.
+ *
+ * 예전에는 232px 로 못 박아 둬서, 넓은 화면에서는 띠 오른쪽이 남고 좁은
+ * 화면에서는 두 칸도 안 들어갔다. 이제 띠가 실제로 가진 너비에서 뽑는다 —
+ * 창 크기뿐 아니라 대화창을 넓히고 줄이는 것에도 같이 반응한다.
+ *
+ * 위아래는 막아 둔다: 좁으면 읽을 수 없고, 넓으면 한 칸이 띠를 다 먹는다.
+ */
+let lastBase = 0;
+
+function syncPanelBase() {
+  const room = el.deck.clientWidth || window.innerWidth;
+  const base = Math.round(Math.max(190, Math.min(340, room / 5)));
+  // 같은 값을 다시 쓰지 않는다. 이건 el.deck 의 style 속성을 건드리는 일인데,
+  // 그 속성을 지켜보는 MutationObserver 가 addPanelGrips 를 다시 부르고 그게
+  // 여기로 돌아온다 — 값이 같아도 '속성이 바뀐 것' 으로 쳐서 끝없이 돈다.
+  if (base !== lastBase) {
+    lastBase = base;
+    el.deck.style.setProperty('--panel-base', `${base}px`);
+  }
+  return base;
+}
+
+function panelBase() {
+  return lastBase || syncPanelBase();
+}
+
+function readPanelScales() {
   try { return JSON.parse(localStorage.getItem(PANEL_KEY) ?? '{}') ?? {}; } catch { return {}; }
 }
 
-function savePanelWidth(id, px) {
+function savePanelScale(id, scale) {
   try {
-    const all = readPanelWidths();
-    if (px === null) delete all[id];
-    else all[id] = px;
+    const all = readPanelScales();
+    if (scale === null) delete all[id];
+    else all[id] = Math.round(scale * 1000) / 1000;
     localStorage.setItem(PANEL_KEY, JSON.stringify(all));
   } catch { /* private mode */ }
 }
@@ -2027,10 +2055,28 @@ function clampPanel(px) {
   return Math.round(Math.max(180, Math.min(760, px)));
 }
 
+/**
+ * 저장된 값이 px 이면 배수로 옮긴다.
+ *
+ * 이 설정은 폭(232 같은 수)으로 저장돼 왔다. 그대로 배수로 읽으면 판때기가
+ * 232배가 되므로, 사람이 쓰던 값을 버리지 않고 지금 기준으로 환산한다.
+ */
+function panelScaleOf(saved, base) {
+  const v = Number(saved);
+  if (!Number.isFinite(v) || v <= 0) return null;
+  return v > 20 ? v / base : v;
+}
+
 function addPanelGrips() {
-  const saved = readPanelWidths();
+  const base = syncPanelBase();
+  const saved = readPanelScales();
   for (const panel of document.querySelectorAll('.deck > .panel[id]')) {
-    if (saved[panel.id]) panel.style.setProperty('--panel-w', `${saved[panel.id]}px`);
+    const scale = panelScaleOf(saved[panel.id], base);
+    if (scale) {
+      panel.style.setProperty('--panel-scale', String(scale));
+      // 옛 px 값을 만났으면 배수로 다시 적어 둔다 — 다음부터는 창을 따라간다.
+      if (Number(saved[panel.id]) > 20) savePanelScale(panel.id, scale);
+    }
     if (panel.querySelector('.panel-grip')) continue;
 
     const grip = document.createElement('div');
@@ -2051,9 +2097,11 @@ function addPanelGrips() {
 
       // Width from the drag distance, not from the pointer's absolute position:
       // the panel can be scrolled sideways mid-drag, and its left edge moves.
+      // 끌어서 정한 폭은 px 가 아니라 기준 대비 배수로 남긴다. 그래야 창을
+      // 키웠을 때 내가 넓혀 둔 칸도 같이 넓어진다.
       const move = (ev) => {
         if (ev.pointerId !== id) return;
-        panel.style.setProperty('--panel-w', `${clampPanel(startW + (ev.clientX - startX))}px`);
+        panel.style.setProperty('--panel-scale', String(clampPanel(startW + (ev.clientX - startX)) / panelBase()));
       };
       const up = (ev) => {
         if (ev && ev.pointerId !== id) return;
@@ -2062,7 +2110,7 @@ function addPanelGrips() {
         window.removeEventListener('pointercancel', up);
         grip.classList.remove('dragging');
         document.body.classList.remove('resizing');
-        savePanelWidth(panel.id, clampPanel(panel.getBoundingClientRect().width));
+        savePanelScale(panel.id, clampPanel(panel.getBoundingClientRect().width) / panelBase());
         syncDeckArrows();
       };
       window.addEventListener('pointermove', move);
@@ -2072,8 +2120,9 @@ function addPanelGrips() {
 
     grip.addEventListener('dblclick', (e) => {
       e.stopPropagation();
-      panel.style.removeProperty('--panel-w');
-      savePanelWidth(panel.id, null);
+      // 인라인 배수만 걷어내면 스타일시트의 기본 배수로 돌아간다.
+      panel.style.removeProperty('--panel-scale');
+      savePanelScale(panel.id, null);
       syncDeckArrows();
     });
   }
@@ -2098,10 +2147,11 @@ function syncDeckArrows() {
 el.deckPrev.addEventListener('click', () => el.deck.scrollTo({ left: 0, behavior: 'smooth' }));
 el.deckNext.addEventListener('click', () => el.deck.scrollTo({ left: el.deck.scrollWidth, behavior: 'smooth' }));
 el.deck.addEventListener('scroll', syncDeckArrows, { passive: true });
-window.addEventListener('resize', syncDeckArrows);
+window.addEventListener('resize', () => { syncPanelBase(); syncDeckArrows(); });
 // Panels appear and disappear as work arrives, so the strip's width is not
-// fixed — watch it rather than checking once.
-new ResizeObserver(syncDeckArrows).observe(el.deck);
+// fixed — watch it rather than checking once. 대화창을 끌어 넓히면 띠도 좁아지고,
+// 그때 기준 폭도 같이 따라가야 한다 (창 크기는 그대로이므로 resize 로는 못 안다).
+new ResizeObserver(() => { syncPanelBase(); syncDeckArrows(); }).observe(el.deck);
 new MutationObserver(() => { addPanelGrips(); syncDeckArrows(); })
   .observe(el.deck, { childList: true, attributes: true, subtree: true });
 addPanelGrips();
