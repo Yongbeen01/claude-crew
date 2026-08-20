@@ -224,6 +224,19 @@ export class Runner extends EventEmitter {
     // 이 유형이 쓰는 도구 스크립트 (받아쓰기 등)를 손 닿는 곳에 둔다.
     equipTools(this.workdir, this.persona?.toolbox ?? []);
     this._spawn(this.buildArgs(), { viaShell: false });
+    /**
+     * 이어 붙인 세션은 뜨는 중이 아니라 **이미 있던 대화로 돌아온 것**이다.
+     *
+     * stream-json 입력 모드에서 CLI 는 첫 지시를 읽어야만 init 을 내보낸다.
+     * 그래서 되살렸는데 아무 말도 안 걸면(끊길 때 일하는 중이 아니었으면)
+     * init 이 영영 안 오고 starting 에 갇힌다 — 화면에서는 그게 "일하는 중"
+     * 으로 그려져서, 자고 있어야 할 사람이 계속 일하는 척을 한다.
+     *
+     * 깨우려고 빈 말을 걸 수는 없다. 그건 사람마다 한 턴씩, 업데이트할 때마다
+     * 무는 값이다. 그냥 사실대로 적는다 — 이 사람은 지금 쉬고 있다.
+     * (restart() 도 같은 이유로 idle 로 둔다.)
+     */
+    if (this._resuming) this.state = 'idle';
     this.emit('change');
     return this;
   }
