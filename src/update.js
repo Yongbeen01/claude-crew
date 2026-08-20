@@ -87,11 +87,13 @@ export async function applyUpdate() {
   // 화면에는 "직접 수정한 파일이 있습니다" 만 뜬다 — 짚어 주지도 않는다.
   // 덮어쓸 위험이 있는 건 고쳐진 추적 파일뿐이고, 새 파일과 이름이 부딪히면
   // 아래 merge 가 스스로 거절하며 그 이유를 말해 준다.
-  const dirty = (await run(gitBin(), ['status', '--porcelain', '--untracked-files=no'])).out.trim();
-  if (dirty) {
-    // 앞의 상태 두 글자와 공백을 떼어 낸다. 고정 폭으로 자르면 파일 이름이
-    // 한 글자씩 잘려 나온다 ("src/update.js" 가 "rc/update.js" 로).
-    const files = dirty.split('\n').map((l) => l.replace(/^.{2}\s+/, '').trim())
+  // trim 을 먼저 하면 안 된다. porcelain 은 " M 파일" 처럼 상태 두 칸 뒤에
+  // 공백 하나가 오는데, 통째로 trim 하면 **첫 줄의 앞 공백만** 사라져서 그
+  // 줄만 정렬이 어긋난다 ("M src/x.js" 가 그대로 파일 이름이 된다).
+  const dirty = (await run(gitBin(), ['status', '--porcelain', '--untracked-files=no'])).out;
+  if (dirty.trim()) {
+    const files = dirty.split('\n').filter((l) => l.length > 3)
+      .map((l) => l.slice(3).trim())
       .filter(Boolean).slice(0, 3).join(', ');
     return { ok: false, error: `앱 폴더에 직접 고친 파일이 있어 덮어쓰지 않았습니다: ${files}` };
   }

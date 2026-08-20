@@ -409,10 +409,17 @@ export class Runner extends EventEmitter {
     return this._write(body);
   }
 
-  stop() {
+  /**
+   * @param {{immediate?: boolean}} [opts] 곧 우리 자신이 죽는 상황이면 true.
+   *   평소에는 1.5초를 주고 곱게 나가길 기다리지만, 앱이 재시작으로 곧
+   *   강제 종료될 때는 그 타이머가 돌기 전에 우리가 먼저 죽는다 — 그러면
+   *   claude 프로세스가 부모 없이 계속 살아남는다(측정으로 확인).
+   */
+  stop({ immediate = false } = {}) {
     if (!this.child) return;
     try { this.child.stdin.end(); } catch { /* already closed */ }
     const child = this.child;
+    if (immediate) { killTree(child); return; }
     // Give it a moment to exit cleanly, then take the whole tree down.
     setTimeout(() => killTree(child), 1500);
   }

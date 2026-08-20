@@ -2001,6 +2001,22 @@ function renderUpdate() {
 el.updateHide.addEventListener('click', () => { updateDismissed = true; renderUpdate(); });
 
 el.updateApply.addEventListener('click', async () => {
+  /*
+   * 받기는 앱을 다시 켠다. 앉아 있는 사람이 있으면 그 세션이 거기서 끝나고
+   * 나눈 대화도 사라진다 (세션은 앱보다 오래 살 수 없다). 묻지 않고 그렇게
+   * 하면, 일 시켜 놓고 잠깐 자리 비운 사람이 돌아와서 텅 빈 방을 본다.
+   */
+  const seated = store.crew.filter((p) => p.state !== 'exited' && p.state !== 'offline');
+  if (seated.length) {
+    const who = seated.map((p) => p.name).slice(0, 4).join(', ');
+    const ok = confirm(
+      `지금 ${seated.length}명이 앉아 있습니다 (${who}${seated.length > 4 ? ' 외' : ''}).\n\n`
+      + '받으면 앱이 다시 시작하면서 이 사람들이 모두 나가고, 나눈 대화도 사라집니다.\n'
+      + '쌓아 둔 업무 이력·지침·유형 설정·창 그룹은 그대로 남습니다.\n\n'
+      + '지금 받을까요? (나중에 눌러도 됩니다)',
+    );
+    if (!ok) return;
+  }
   el.updateApply.disabled = true;
   el.updateText.textContent = '받는 중…';
   const r = await api('/api/update', { method: 'POST' });

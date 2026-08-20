@@ -474,8 +474,14 @@ export function createServer() {
         const result = await applyUpdate();
         // 받기만 하고 멈추면 돌고 있는 것은 여전히 옛 코드다. 답을 보낸 뒤
         // 스스로 다시 켠다 — 화면은 서버가 돌아오면 알아서 새로고침한다.
+        //
+        // 다시 켜기 전에 앉아 있는 사람들을 **직접** 정리한다. 재시작은 우리를
+        // 강제 종료하므로 평소의 유예 시간이 돌기 전에 우리가 먼저 죽고,
+        // 그러면 claude 프로세스가 부모 없이 남는다 (실제로 하나 남는 걸 봤다).
+        const seated = result.ok ? crew.seatedCount() : 0;
+        if (result.ok) crew.shutdownAll({ immediate: true });
         const restarting = result.ok ? restartApp() : false;
-        return json(res, result.ok ? 200 : 400, { ...result, restarting });
+        return json(res, result.ok ? 200 : 400, { ...result, restarting, ended: seated });
       }
       if (url.searchParams.get('check') === '1') return json(res, 200, await checkForUpdate());
       return json(res, 200, updateStatus());

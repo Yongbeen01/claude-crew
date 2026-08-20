@@ -548,8 +548,14 @@ export function transcript(id, limit = 200) {
   return person.runner.transcript.slice(-limit);
 }
 
-export function shutdownAll() {
-  for (const person of people.values()) person.runner?.stop();
+export function shutdownAll(opts = {}) {
+  for (const person of people.values()) person.runner?.stop(opts);
+  return people.size;
+}
+
+/** 지금 자리에 앉아 있는 사람 수 — 재시작 전에 물어볼 때 쓴다. */
+export function seatedCount() {
+  return [...people.values()].filter((p) => p.runner?.alive).length;
 }
 
 /** Everyone currently seated — used by the summariser. */
