@@ -451,7 +451,11 @@ export function cabinet(ctx, cx, cy, color = '#8a8f9c') {
 }
 
 // ── furniture ───────────────────────────────────────────────────────────────
-/** Office chair, seen from above-behind: backrest on top, seat below. */
+/**
+ * Office chair, seen from above-behind: backrest on top, seat below.
+ * 1× 그대로 둔다 — 사람·책상만 확대하는 화면에서 의자는 책상 앞면 아래로
+ * 완전히 가려지므로, 같이 키우면 빈 자리에서만 등받이가 삐져나온다.
+ */
 export function chair(ctx, cx, cy, color = '#454c5e') {
   const dark = darken(color, 0.3);
   soft(ctx, cx - 10, cy - 14, 20, 10, color);
@@ -480,7 +484,9 @@ function drawEmptyDesk(ctx, cx, cy, { hover = false } = {}) {
  * 그 빛깔이 예전 화면 색과 같은 뜻이다(초록은 일하는 중, 빨강은 승인 대기,
  * 회색은 쉬는 중). 그림만 숲으로 바뀌었지 읽는 법은 바뀌지 않는다.
  */
-function drawDesk(ctx, cx, cy, { screen = '#1b2430', accent = '#7fd1c0', scan = 0, lamp = null } = {}) {
+function drawDesk(ctx, cx, cy, {
+  screen = '#1b2430', accent = '#7fd1c0', scan = 0, lamp = null, glow = 0.3,
+} = {}) {
   const W = 76;
   const H = 30;
   const x = cx - W / 2;
@@ -525,8 +531,11 @@ function drawDesk(ctx, cx, cy, { screen = '#1b2430', accent = '#7fd1c0', scan = 
   // 떠 있는 수정 — 모니터가 있던 자리
   const mx = cx + 16;
   ctx.save();
-  ctx.globalAlpha = 0.3;
-  px(ctx, mx - 10, y + 4, 20, 16, accent);           // 번지는 빛
+  // 번지는 빛. 일하는 동안에는 이 세기가 오르내려서, 멀리서 봐도 그 자리의
+  // 수정만 숨 쉬듯 밝아진다 — 사람이 책상에 가려 보이지 않는 각도에서도
+  // "돌고 있다" 가 읽히는 유일한 단서다.
+  ctx.globalAlpha = Math.max(0, Math.min(1, glow));
+  px(ctx, mx - 10, y + 4, 20, 16, accent);
   ctx.restore();
   px(ctx, mx - 3, y + 2, 6, 4, lighten(screen, 0.25));
   px(ctx, mx - 6, y + 6, 12, 9, screen);
@@ -778,6 +787,10 @@ function drawCharacter(ctx, cx, cy, av, opts = {}) {
     carry = 0,
     /** a small colour tag on the chest — which app a window-person belongs to */
     badge = null,
+    /** 자는 중: 눈을 감고, 입이 숨을 따라 벌어졌다 닫힌다 */
+    asleep = false,
+    /** 숨의 위상(라디안). asleep 일 때만 쓴다 */
+    breath = 0,
   } = opts;
   ctx.save();
   ctx.globalAlpha = alpha;
@@ -811,7 +824,10 @@ function drawCharacter(ctx, cx, cy, av, opts = {}) {
   }
 
   // arms — they rest on the desk while typing, and come up to carry a box
-  const swing = typing ? Math.round(Math.sin(typing) * 1) : 0;
+  //
+  // 두 팔은 서로 반대로 오르내린다(부호가 다르다). 진폭이 1px 이던 때는
+  // 확대해서 봐도 움직이는지 알 수 없었다 — 2px 이라야 "치고 있다" 로 읽힌다.
+  const swing = typing ? Math.round(Math.sin(typing) * 2) : 0;
   const hug = Math.round(carry * 4);
   const lArmY = torsoY + 2 + swing - hug;
   const rArmY = Math.round(torsoY + 2 - armLift * 12 - swing - hug);
@@ -894,8 +910,10 @@ function drawCharacter(ctx, cx, cy, av, opts = {}) {
     ctx.restore();
     return headY;
   }
-  if (patted) {
-    // eyes closed contentedly — a shallow arch, raised in the middle
+  if (patted || asleep) {
+    // eyes closed contentedly — a shallow arch, raised in the middle.
+    // 우는 눈은 가운데가 *내려간* 아치다. 방향 하나로 "꼭 감았다" 와 "편히
+    // 감았다" 가 갈리므로, 자는 눈은 쓰다듬을 때와 같은 위로 굽은 아치를 쓴다.
     px(ctx, hx - 5, headY + 6, 1, 1, '#2b2b33');
     px(ctx, hx - 4, headY + 5, 2, 1, '#2b2b33');
     px(ctx, hx - 2, headY + 6, 1, 1, '#2b2b33');
@@ -918,12 +936,78 @@ function drawCharacter(ctx, cx, cy, av, opts = {}) {
     px(ctx, hx - 1, headY + 9, 2, 1, mouth);
     px(ctx, hx - 2, headY + 8, 1, 1, mouth);
     px(ctx, hx + 1, headY + 8, 1, 1, mouth);
+  } else if (asleep) {
+    // 숨을 따라 벌어졌다 닫히는 입. 감은 눈만으로는 자는 사람과 눈 깜빡이는
+    // 순간이 구별되지 않는데, 이 1px 이 그 둘을 가른다.
+    const open = 1 + Math.round(Math.max(0, Math.sin(breath)));
+    px(ctx, hx - 1, headY + 8, 2, open, darken(av.skin, 0.42));
   } else {
     px(ctx, hx - 1, headY + 8, 2, 1, darken(av.skin, 0.35));
   }
 
   ctx.restore();
   return headY;
+}
+
+// ── 지금 무엇을 하고 있는가 ────────────────────────────────────────────────
+/**
+ * 사람 하나에 두 가지 표시.
+ *
+ *   busy — 차례로 튀어 오르는 세 점: 세션이 돌고 있다
+ *   zzz  — 떠오르며 사라지는 Z: 세션이 멈춰 있다
+ *
+ * 둘은 짝이다. 이름표(글자)를 읽지 않고 방을 훑기만 해도 "누가 일하고 누가
+ * 멈췄는가" 가 나와야 하므로, 같은 자리에 서로 다른 리듬으로 둔다 — 하나는
+ * 통통 튀고 하나는 느리게 떠오른다.
+ *
+ * 자리는 **머리 옆**이다. 머리 위로 올렸더니 마법사 모자와 토끼 귀 위에
+ * 앉아 버렸고, 그 위는 이미 이름표가 걸려 있는 자리라 비켜설 곳이 없었다.
+ * (x, y) 는 표시의 왼쪽 위 — 머리 오른쪽에 붙여 오른쪽으로 자란다.
+ *
+ * 둘 다 방 좌표(1×)로 그린다. 사람은 확대해 붙이지만 이 표시는 그러지 않는
+ * 이유는, 확대 상자 안에 넣으면 상자 밖으로 나가는 프레임이 잘려 나가기
+ * 때문이다(떠오르는 Z 는 머리 위 20px 까지 올라간다).
+ */
+export function busy(ctx, x, y, t) {
+  // 뛰어오른 점은 밝고, 내려앉은 점은 어둡되 **사라지지는 않는다**. 어두운
+  // 쪽을 너무 내렸더니 세 점이 아니라 한두 점이 깜빡이는 것으로 보였다 —
+  // 셋이 차례로 도는 리듬이 곧 "돌아가는 중" 이라 셋 다 늘 있어야 한다.
+  const ON = '#ffd979';
+  const OFF = '#bd9550';
+  for (let i = 0; i < 3; i += 1) {
+    const k = ((((t * 1.5) - i * 0.17) % 1) + 1) % 1;
+    const hop = Math.max(0, Math.sin(k * Math.PI * 2));
+    const dx = x + i * 6;
+    const yy = Math.round(y - hop * 5);
+    // 윤곽 한 겹 — 이끼 바닥과 나무 위에서도 점이 읽힌다
+    px(ctx, dx - 1, yy - 1, 5, 5, '#33260f');
+    px(ctx, dx, yy, 3, 3, hop > 0.25 ? ON : OFF);
+    if (hop > 0.6) px(ctx, dx, yy, 2, 1, '#fffdf4');
+  }
+}
+
+/** 픽셀 Z 한 글자. s 가 한 변의 길이. */
+function zGlyph(ctx, x, y, s, color) {
+  px(ctx, x, y, s, 1, color);
+  px(ctx, x, y + s - 1, s, 1, color);
+  for (let i = 0; i < s - 2; i += 1) px(ctx, x + s - 2 - i, y + 1 + i, 1, 1, color);
+}
+
+export function zzz(ctx, x, y, t, rate = 0.45) {
+  for (let i = 0; i < 3; i += 1) {
+    const k = ((((t * rate) - i / 3) % 1) + 1) % 1;
+    // 멀어질수록 커지고 흐려진다 — 위로 떠올라 사라지는 것으로 읽힌다
+    const s = 3 + Math.round(k * 4);
+    const gx = Math.round(x + k * 11);
+    const gy = Math.round(y - k * 22);
+    const a = k < 0.12 ? k / 0.12 : k > 0.7 ? Math.max(0, (1 - k) / 0.3) : 1;
+    if (a <= 0.03) continue;
+    ctx.save();
+    ctx.globalAlpha = a;
+    zGlyph(ctx, gx + 1, gy + 1, s, '#22303f');
+    zGlyph(ctx, gx, gy, s, '#e2f1ff');
+    ctx.restore();
+  }
 }
 
 /** Speech / status bubble with a single glyph. */
@@ -1051,9 +1135,13 @@ function blitScaled(ctx, w, h, ox, oy, dx, dy, s, draw) {
 }
 
 /* 스프라이트가 원점 둘레로 차지하는 자리. 넉넉히 잡는다 — 머리 장식·우는 눈물·
- * 든 상자까지 들어가야 하고, 잘리면 그 프레임만 뭉텅 사라진다. */
+ * 든 상자까지 들어가야 하고, 잘리면 그 프레임만 뭉텅 사라진다.
+ *
+ * DESK_BOX 가 책상(30px)보다 훨씬 높은 건 빈 책상 위에 뜨는 「+」 때문이다.
+ * 그건 책상 위 22px 에 있어서 상자를 책상에 맞춰 잡았더니 확대할 때 통째로
+ * 잘려 나갔다 — 사람을 뽑는 자리인데 뽑으라는 표시가 사라져 있었다. */
 const CH_BOX = { w: 56, h: 72, ox: 28, oy: 64 };
-const DESK_BOX = { w: 100, h: 48, ox: 50, oy: 44 };
+const DESK_BOX = { w: 100, h: 64, ox: 50, oy: 58 };
 
 export function character(ctx, cx, cy, av, opts = {}) {
   const s = opts.scale ?? 1;

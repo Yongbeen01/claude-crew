@@ -2,6 +2,7 @@ import {
   px, floorPatch, rug, room, mushroom, tree,
   plant, chair, desk, emptyDesk, character, bubble, avatarOf,
   door, zoneFloor, partition, orchardFloor, fence, grape, stem, branch,
+  busy, zzz,
 } from './sprites.js';
 
 /**
@@ -24,28 +25,48 @@ import {
  * partition between them rather than a gap.
  */
 
+/**
+ * 사람과 책상만 방보다 크게. 방(바닥·울타리·포도밭)은 그대로 두고 이 둘만
+ * 키우면 화면에서 눈이 가야 할 곳이 커진다.
+ */
+const SPRITE_SCALE = 1.6;
+
+/**
+ * 자리의 치수는 전부 배율에서 나온다.
+ *
+ * 예전엔 78·96·110·118 이 손으로 맞춰져 있었다. 그래서 배율만 올리면 책상이
+ * 옆 책상을 덮고 이름표가 윗줄 책상 위에 앉았다 — 배율과 치수가 따로 놀았기
+ * 때문이다. 이제 SPRITE_SCALE 하나만 바꾸면 칸·간격·이름표 높이가 함께 따라온다.
+ *
+ * 47 = 1× 스프라이트에서 발밑부터 머리 장식(마법사 모자·토끼 귀) 끝까지,
+ * 76·22·4 = 책상의 폭, 책상이 사람 뒤로 내려앉는 깊이, 앞면 아래로 남는 껍질.
+ */
+const CH_TOP = Math.round(47 * SPRITE_SCALE);
+const DESK_W = Math.round(76 * SPRITE_SCALE);
+
 /** 한 자리가 차지하는 칸 — 러그와 히트박스의 크기. */
-const CELL_W = 78;
-const CELL_H = 96;
+const STAND_Y = CH_TOP + 6; // floor point the person stands on
+const DESK_Y = STAND_Y + Math.round(22 * SPRITE_SCALE); // front edge of the desk
+const CELL_W = DESK_W + 14;
+const CELL_H = DESK_Y + Math.round(4 * SPRITE_SCALE) + 8;
 /** Where a workstation sits inside its cell — the rug is sized to this, not to
  *  the cell, or a taller cell stretches it into the next row's nameplate. */
-const RUG_TOP = 22;
-const RUG_H = 56;
-const STAND_Y = 46; // floor point the person stands on
-const DESK_Y = 74; // front edge of the desk
-/** 책상 스프라이트의 세로 크기 (sprites.js desk 의 H). */
-const DESK_H = 30;
+const RUG_TOP = STAND_Y - 24;
+const RUG_H = DESK_Y + 6 - RUG_TOP;
+/** 이름표가 걸리는 높이. 머리 장식 끝보다 조금 낮다 — 모자챙과 살짝 겹치는
+ *  편이, 아무 것도 안 쓴 사람 머리 위에 이름표가 붕 떠 있는 것보다 낫다. */
+const PLATE_LIFT = CH_TOP - 14;
 /**
  * 책상 배치: 2열 3행.
  *
- * 구역 폭은 예전(3열 × 78)의 1.5배로 넓히고, 그 안에서 책상 덩어리를 가운데
- * 정렬한다. 행 간격을 열 간격보다 조금 넓게 둔 건 사람 위에 이름표가 걸리기
- * 때문이다 — 가로로 붙는 것보다 세로로 붙는 게 먼저 읽기 힘들어진다.
+ * 구역 폭은 책상 덩어리에 사방 여유를 더한 만큼. 행 간격을 열 간격보다 넓게
+ * 둔 건 사람 위에 이름표가 걸리기 때문이다 — 가로로 붙는 것보다 세로로 붙는
+ * 게 먼저 읽기 힘들어진다.
  */
-const CREW_ZONE_W = Math.round(3 * CELL_W * 1.5);
-const COL_STEP = 110;
-const ROW_STEP = 118;
 const CREW_COLS = 2;
+const COL_STEP = CELL_W + 8;
+const ROW_STEP = CELL_H + 24;
+const CREW_ZONE_W = (CREW_COLS - 1) * COL_STEP + CELL_W + 40;
 
 const WALL_TOP = 42;
 const WALL = 4;
@@ -61,11 +82,6 @@ const DOOR_BAY = 32;
 const DOOR_H = 34;
 const MAX_SCALE = 5;
 
-/**
- * 사람과 책상만 방보다 한 뼘 크게. 방(바닥·벽·테이블)은 그대로 두고 이 둘만
- * 키우면 화면에서 눈이 가야 할 곳이 커진다.
- */
-const SPRITE_SCALE = 1.25;
 const bigChar = (c, x, y, av, o = {}) => character(c, x, y, av, { ...o, scale: SPRITE_SCALE });
 const bigDesk = (c, x, y, o = {}) => desk(c, x, y, { ...o, scale: SPRITE_SCALE });
 const bigEmptyDesk = (c, x, y, o = {}) => emptyDesk(c, x, y, { ...o, scale: SPRITE_SCALE });
@@ -110,11 +126,18 @@ const BAND_GAP = 12;
  * 여기만 키우면 송이도 같은 비율로 커진다. */
 const GRAPE_R = 10;
 
-/** Monitor glow + desk lamp per state. */
+/**
+ * Monitor glow + desk lamp per state.
+ *
+ * idle 의 수정이 예전엔 파랗게 밝았다. 그런데 idle 은 "쉬는 중" 이 아니라
+ * **세션이 멈춰 있다** 는 뜻이라(대답을 마쳤거나 도구가 끊겼거나), 그 자리에서
+ * 사람은 잠들어 있는데 수정만 환한 건 서로 다른 말을 하는 것이었다. 잠든
+ * 사람 옆의 수정은 잦아든다.
+ */
 const LOOK = {
-  starting: { screen: '#1d2733', accent: '#8d8d99', scan: false, lamp: null },
+  starting: { screen: '#1d2733', accent: '#8d8d99', scan: true, lamp: null },
   working: { screen: '#12303a', accent: '#7fd1c0', scan: true, lamp: null },
-  idle: { screen: '#1b2430', accent: '#5b8def', scan: false, lamp: null },
+  idle: { screen: '#1b2430', accent: '#46577a', scan: false, lamp: null },
   sleeping: { screen: '#171c24', accent: '#3a3f4c', scan: false, lamp: null },
   awaiting_approval: { screen: '#3a1b1b', accent: '#e0705b', scan: false, lamp: '#e0705b' },
   leaving: { screen: '#14161a', accent: '#2b303c', scan: false, lamp: null },
@@ -691,8 +714,21 @@ export class Office {
     const av = avatarOf(person.seed, person.sprite);
     const look = LOOK[person.state] ?? LOOK.idle;
     const t = now / 1000 + av.phase * 6;
-    const working = person.state === 'working';
+    /**
+     * 방에서 사람은 두 모습 중 하나다: 일하고 있거나, 자고 있거나.
+     *
+     * working 은 지시를 받은 순간부터 그 턴이 끝날 때까지다 — 도구를 돌리는
+     * 동안도 여기에 들어간다. 그 턴이 어떻게든 끝나면(대답을 마쳤든, 도구가
+     * 중간에 끊겼든) 세션은 idle 이 되고, 그때부터는 잔다. 예전엔 idle 인
+     * 사람이 눈 뜨고 앉아 있어서, 멈춘 세션과 돌아가는 세션이 화면에서
+     * 똑같아 보였다 — 방을 훑어 무엇이 돌고 있는지 아는 게 이 화면의 일인데.
+     *
+     * sleeping(5분 넘게 조용함)은 같은 잠이되 더 깊다: 더 처지고 더 느리다.
+     */
+    const working = person.state === 'working' || person.state === 'starting';
     const sleeping = person.state === 'sleeping';
+    const asleep = sleeping || person.state === 'idle';
+    const deep = sleeping;
     const dragging = this.drag?.moved && this.drag.kind === 'crew' && this.drag.id === person.id;
 
     const patted = this.pat.id === person.id && now < this.pat.until;
@@ -706,20 +742,30 @@ export class Office {
     const atDesk = !leaving || leaving.phase === 'cry' || leaving.phase === 'pack';
     if (atDesk && !dragging) {
       const crying = !!leaving;
+      const dozing = asleep && !crying;
+      // 숨. 자는 사람은 느리게, 일하는 사람은 빠르게 — 같은 위아래 움직임이라도
+      // 리듬이 다르면 멀리서도 다른 상태로 읽힌다.
+      const breath = t * (deep ? 0.7 : 1.05);
       // Sobbing is a shake, not a bob — a different rhythm from breathing.
       const bob = crying
         ? Math.sin(t * 9) * 0.9
-        : sleeping ? 2 : Math.sin(t * (working ? 3.2 : 1.4)) * (working ? 0.8 : 0.5);
-      const blink = !sleeping && Math.sin(t * 0.9 + av.phase * 10) > 0.985;
+        : dozing
+          ? 1 + Math.sin(breath) * 0.7
+          : Math.sin(t * (working ? 3.4 : 1.4)) * (working ? 0.9 : 0.5);
+      const blink = !dozing && Math.sin(t * 0.9 + av.phase * 10) > 0.985;
       const headY = bigChar(ctx, a.cx, a.standY, av, {
         bob,
-        blink: blink || sleeping,
+        blink,
+        asleep: dozing,
+        breath,
+        // 자면 고개가 한쪽으로 기운 채 굳고, 일하면 화면을 훑느라 좌우로 흔들린다
+        tilt: dozing ? 1 : working && !crying ? Math.round(Math.sin(t * 1.7)) : 0,
         typing: working && !crying ? t * 7 : 0,
         alpha: person.state === 'exited' ? 0.45 : 1,
         patted: patted && !crying,
         ruffle,
         crying,
-        droop: crying ? 1 : 0,
+        droop: crying ? 1 : dozing ? (deep ? 1 : 0.5) : 0,
         step: crying ? t * 9 : 0,
       });
 
@@ -730,14 +776,12 @@ export class Office {
 
       if (person.state === 'awaiting_approval') {
         bubble(ctx, a.cx + 16, headY + 2, '!', '#fff1ef', '#c9402c');
-      } else if (sleeping) {
-        const k = Math.floor(now / 700) % 3;
-        ctx.save();
-        ctx.globalAlpha = 0.75;
-        for (let i = 0; i <= k; i += 1) {
-          px(ctx, a.cx + 9 + i * 3, headY - 2 - i * 4, 2, 2, '#5f6879');
-        }
-        ctx.restore();
+      } else if (dozing) {
+        // 머리 옆에서 떠올라 사라지는 Z. 예전엔 회색 점 세 개가 켜졌다 꺼지길
+        // 반복했는데, 점은 로딩 표시로도 읽혀서 "자는 중" 이 되지 못했다.
+        zzz(ctx, a.cx + 12, headY + 2, t, deep ? 0.34 : 0.5);
+      } else if (working && !crying) {
+        busy(ctx, a.cx + 12, headY + 6, t);
       } else if (person.state === 'exited') {
         bubble(ctx, a.cx + 16, headY + 2, '×', '#efeae2', '#6b6257');
       }
@@ -747,6 +791,8 @@ export class Office {
       screen: look.screen,
       accent: look.accent,
       scan: look.scan ? (now / 60) % 15 : 0,
+      // 일하는 동안만 수정이 숨 쉰다. 자는 자리는 잦아든 채로 가만히 있다.
+      glow: working ? 0.42 + Math.sin(t * 4.2) * 0.22 : asleep ? 0.18 : 0.3,
       lamp: look.lamp && Math.floor(now / 500) % 2 === 0 ? look.lamp : null,
     });
 
@@ -1006,7 +1052,7 @@ export class Office {
       }
       // Anchor the plate's bottom-centre just above the tallest headpiece
       // (rabbit ears and the wizard hat both reach ~18px over the head).
-      const y = (a.standY - 48) * this.scale;
+      const y = (a.standY - PLATE_LIFT) * this.scale;
       plate.style.transform = `translate(${a.cx * this.scale}px, ${y}px) translate(-50%, -100%)`;
       plate.dataset.state = person.state;
       plate.classList.toggle('sel', this.selectedId === person.id);
@@ -1243,7 +1289,7 @@ export class Office {
     if (hit?.kind !== 'seat' || !hit.person) return;
     const dir = Math.sign(e.movementX);
     if (!dir) return;
-    const overHead = p.y < hit.y + 52;
+    const overHead = p.y < hit.y + STAND_Y - Math.round(12 * SPRITE_SCALE);
     if (!overHead) return;
     if (this.pat.id !== hit.person.id) {
       this.pat = { id: hit.person.id, count: 0, lastDir: dir, until: 0, ruffleUntil: 0 };
