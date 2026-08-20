@@ -3,7 +3,7 @@ import { config, baseUrl, ensureDirs, DATA_DIR } from './config.js';
 import { createServer } from './server.js';
 import { seedPersonas, listPersonas } from './personas.js';
 import { startUsagePolling } from './usage.js';
-import { shutdownAll, poke, all as allCrew, setSummary } from './crew.js';
+import { shutdownAll, poke, all as allCrew, setSummary, revive } from './crew.js';
 import { refreshSummaries } from './summarize.js';
 import { startUpdatePolling } from './update.js';
 import { ensureToolbox } from './toolbox.js';
@@ -50,6 +50,10 @@ server.listen(config.port, config.host, () => {
   startDesktopPolling();
   // PPT·엑셀용 공용 패키지. 처음 한 번만 받고, 그 뒤로는 사람마다 링크만 겁니다.
   ensureToolbox();
+  // 지난번에 앉아 있던 사람들을 그 자리에 다시 앉힙니다. 나눈 대화를 그대로
+  // 들고 돌아오고, 일하던 중에 끊겼다면 이어서 하라는 말을 듣습니다.
+  const back = revive();
+  if (back.length) console.log(`  돌아옴   ${back.map((p) => p.name).join(', ')}`);
 
   if (config.openBrowserOnStart) openBrowser(baseUrl);
 });

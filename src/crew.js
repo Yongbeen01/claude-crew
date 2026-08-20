@@ -125,10 +125,25 @@ function nextName(personaKey) {
   return label;
 }
 
+/**
+ * 다음에 앱이 켜질 때 이 사람들을 그대로 다시 앉히기 위해 필요한 전부.
+ *
+ * 핵심은 `sessionId` 다 — 그것만 있으면 `--resume` 이 나눈 대화를 통째로 다시
+ * 붙여 준다. `busy` 는 끊길 때 일하는 중이었는지로, 되살릴 때 "이어서 하세요"
+ * 라고 말을 걸지 정한다. 그래서 이 파일은 사람이 들고 날 때만이 아니라
+ * **일을 시작하고 끝낼 때마다** 다시 쓰인다 (wireRunner) — 앱이 곱게 죽지
+ * 못하는 경우(크래시·PC 재부팅)에도 마지막 상태가 남아 있어야 하기 때문이다.
+ */
 function persist() {
   writeJson(paths.crew(), {
     people: [...people.values()].map((p) => ({
       id: p.id, personaKey: p.personaKey, name: p.name, seat: p.seat, jobName: p.jobName,
+      watch: p.watch,
+      sessionId: p.runner?.sessionId ?? null,
+      model: p.runner?.model ?? null,
+      effort: p.runner?.effort ?? null,
+      busy: p.runner?.state === 'working',
+      at: Date.now(),
     })),
   });
 }
@@ -151,7 +166,17 @@ function announce() {
 function wireRunner(person) {
   const r = person.runner;
 
-  r.on('change', () => announce());
+  // 일하는 중인지가 바뀔 때마다 명단을 다시 적는다. 앱이 곱게 죽을 때만
+  // 적으면 정작 필요한 경우 — 크래시·PC 재부팅 — 에 아무것도 안 남는다.
+  let wasBusy = null;
+  r.on('change', () => {
+    const busy = r.state === 'working';
+    if (busy !== wasBusy) {
+      wasBusy = busy;
+      persist();
+    }
+    announce();
+  });
 
   r.on('init', () => {
     logActivity('spawn', `${person.name}(${person.persona.label}) 출근`, person.id);
@@ -191,7 +216,7 @@ function wireRunner(person) {
     // The turn is over — the chat clears everything it was showing while the
     // person worked and keeps only the answer.
     bus.emit('turn-end', { personId: person.id, isError: !!ev.is_error, at: Date.now() });
-    if (ev.is_error) {
+    if (ev.is_error && !r.stillborn) {
       logActivity('error', `${person.name} — 턴 실패: ${String(ev.result ?? '').slice(0, 80)}`, person.id);
     }
     // Turn over: nothing can still be blocking on a decision.
@@ -200,12 +225,42 @@ function wireRunner(person) {
   });
 
   r.on('exit', ({ code, error }) => {
+    // 이어 붙이기가 실패한 것뿐이면 곧 새 대화로 다시 앉는다 (revive). 그
+    // 사이에 "비정상 종료" 를 적으면, 스스로 고쳐지는 일을 사고로 읽게 된다.
+    if (r.stillborn) return;
     logActivity(
       code === 0 ? 'exit' : 'error',
       code === 0 ? `${person.name} 퇴근` : `${person.name} 비정상 종료: ${String(error ?? code).slice(0, 120)}`,
       person.id,
     );
     announce();
+  });
+}
+
+/**
+ * 한 사람의 세션을 세운다. 새로 뽑을 때와 되살릴 때가 **같은 코드**를 지난다 —
+ * 여기가 갈라지면 되살아난 사람만 조용히 다른 도구·다른 권한으로 앉게 된다.
+ */
+function makeRunner(person, {
+  model, effort, appendSystemPrompt = '', mcpServers, sessionId, resume = false,
+} = {}) {
+  const token = issueToken(person.id);
+  return new Runner({
+    personId: person.id,
+    persona: person.persona,
+    model,
+    effort,
+    sessionId,
+    resume,
+    appendSystemPrompt,
+    pluginDirs: [person.persona.dir],
+    mcpServers: {
+      ...mcpConfigFor(token),
+      ...(person.watch ? browserMcp(person) : {}),
+      ...(mcpServers ?? {}),
+    },
+    alwaysAllowTools: officeToolNames(),
+    settingsJson: sessionSettings(token),
   });
 }
 
@@ -241,22 +296,12 @@ export function hire(personaKey, opts = {}) {
   // Everything already known about this job rides in on the system prompt, so
   // the user does not have to explain it a second time.
   const brief = opts.jobName ? briefing(opts.jobName) : '';
-  const token = issueToken(person.id);
 
-  person.runner = new Runner({
-    personId: person.id,
-    persona,
+  person.runner = makeRunner(person, {
     model: pickModel(opts.model),
     effort: pickEffort(opts.effort),
     appendSystemPrompt: [brief, opts.appendSystemPrompt].filter(Boolean).join('\n\n'),
-    pluginDirs: [persona.dir],
-    mcpServers: {
-      ...mcpConfigFor(token),
-      ...(person.watch ? browserMcp(person) : {}),
-      ...(opts.mcpServers ?? {}),
-    },
-    alwaysAllowTools: officeToolNames(),
-    settingsJson: sessionSettings(token),
+    mcpServers: opts.mcpServers,
   });
 
   people.set(person.id, person);
@@ -564,12 +609,92 @@ export function all() {
 }
 
 /**
- * Seats and names from the last run are shown as empty desks, not revived:
- * a Claude session cannot outlive the process that owned its stdin.
+ * 앱이 다시 켜졌을 때, 지난번에 앉아 있던 사람들을 그대로 다시 앉힌다.
+ *
+ * 오래 "세션은 앱보다 오래 살 수 없다" 고 적혀 있었고, **프로세스** 얘기로는
+ * 맞는 말이었다. 하지만 대화는 프로세스가 아니라 디스크에 있다 — CLI 가
+ * 자기 파일에 적어 두고, `--resume <sessionId>` 로 언제든 다시 붙는다.
+ * 이미 `setWatch`/`setTuning` 이 살아 있는 사람을 그 방법으로 갈아치우고
+ * 있었으니, 앱 재시작이라고 다를 이유가 없었다.
+ *
+ * 그래서 켤 때마다 되살린다. 업데이트로 스스로 다시 켠 것이든, 크래시였든,
+ * PC 를 재부팅했든 마찬가지다 — 어제 퇴근할 때 일하던 사람이 오늘 아침에도
+ * 그 자리에 앉아 있다.
+ *
+ * 되살리지 **않는** 경우는 셋뿐이다: 세션을 모르는 옛 형식의 기록, 사라진
+ * 유형, 그리고 자리 수를 줄여서 이제 없는 자리. 이어 붙이기 자체가 실패하는
+ * 경우는 미리 막지 않고 실패한 뒤에 처리한다 (Runner.startFresh) — 대화
+ * 파일이 어디에 있는지를 우리가 계산하기 시작하면 그 계산이 곧 틀린다.
  */
-export function lastSeating() {
-  return readJson(paths.crew(), { people: [] });
+export function revive() {
+  if (people.size) return [];
+  const saved = readJson(paths.crew(), { people: [] }).people ?? [];
+  const back = [];
+
+  for (const rec of saved) {
+    if (!rec?.id || !rec.sessionId) continue;
+    const persona = loadPersona(rec.personaKey);
+    if (!persona) continue;
+    if (!(rec.seat >= 0 && rec.seat < config.maxSeats)) continue;
+
+    for (const group of persona.toolbox) ensureGroup(group);
+
+    const person = new Person({
+      id: rec.id,
+      personaKey: rec.personaKey,
+      name: rec.name,
+      seat: rec.seat,
+      watch: rec.watch,
+    });
+    person.persona = persona;
+    person.jobName = rec.jobName ?? null;
+    person.runner = makeRunner(person, {
+      model: pickModel(rec.model),
+      effort: pickEffort(rec.effort),
+      // 일 지침은 저장해 둔 것을 쓰지 않고 지금 다시 읽는다 — 그 사이에
+      // 인수인계로 갱신됐을 수 있고, 그러면 새 것이 맞다.
+      appendSystemPrompt: rec.jobName ? briefing(rec.jobName) : '',
+      sessionId: rec.sessionId,
+      resume: true,
+    });
+
+    people.set(person.id, person);
+    wireRunner(person);
+    // 붙을 대화가 없으면 CLI 는 init 도 못 내보내고 죽는다. 그때만 새 대화로.
+    person.runner.once('exit', () => {
+      if (person.runner.init || !people.has(person.id)) return;
+      logActivity('spawn', `${person.name} — 지난 대화를 찾지 못해 새로 시작합니다`, person.id);
+      person.runner.startFresh();
+      persist();
+    });
+    person.runner.start();
+
+    if (rec.busy) person.runner.send(RESUME_NUDGE, { hidden: true });
+    back.push(person);
+  }
+
+  if (back.length) {
+    const who = back.map((p) => p.name).join(', ');
+    logActivity('spawn', `자리로 돌아왔습니다 — ${who}`);
+    persist();
+    announce();
+  }
+  return back;
 }
+
+/**
+ * 끊긴 채로 되살아난 사람에게 던지는 첫 마디.
+ *
+ * 대화는 통째로 돌아왔지만 **끊긴 그 턴**은 못 돌아온다 — 프로세스가 죽을 때
+ * 돌던 도구는 거기서 멈췄고, 쓰다 만 파일은 쓰다 만 채다. 그래서 "이어서
+ * 해라" 가 아니라 "어디까지 됐는지 먼저 보고 이어서 해라" 여야 한다.
+ */
+const RESUME_NUDGE = [
+  '사무실이 다시 켜졌습니다. 아까 하던 일이 중간에 끊겼습니다.',
+  '먼저 어디까지 했는지 확인하세요 — 만들던 파일이 있으면 그 파일을 열어 지금 상태를 보세요.',
+  '이미 끝낸 것은 다시 하지 말고, 남은 것부터 이어서 하세요.',
+  '무엇을 이어서 하는지 한 줄로 말하고 시작하세요.',
+].join(' ');
 
 // The MCP tools act on whoever called them; give that layer the two things it
 // needs without importing crew.js back and creating a cycle.

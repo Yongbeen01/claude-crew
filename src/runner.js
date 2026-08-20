@@ -4,6 +4,7 @@ import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import path from 'node:path';
 import { config, SESSIONS_DIR } from './config.js';
+import { appendJsonl, readJsonl } from './store.js';
 import { equipTools, linkInto } from './toolbox.js';
 import { claudeBin } from './tools.js';
 
@@ -76,6 +77,8 @@ export class Runner extends EventEmitter {
    * @param {string} [opts.settingsJson] inline --settings payload
    * @param {string} [opts.model]        overrides the type's default model
    * @param {string} [opts.effort]       overrides the type's default effort
+   * @param {string} [opts.sessionId]    이어 붙일 대화. 없으면 새로 발급한다
+   * @param {boolean} [opts.resume]      그 대화에 다시 붙는다 (앱 재시작 후 되살리기)
    */
   constructor(opts) {
     super();
@@ -90,7 +93,7 @@ export class Runner extends EventEmitter {
      */
     this.model = opts.model || opts.persona?.model || config.defaultModel;
     this.effort = opts.effort || opts.persona?.effort || null;
-    this.sessionId = randomUUID();
+    this.sessionId = opts.sessionId || randomUUID();
     this.workdir = path.join(SESSIONS_DIR, this.personId);
     this.child = null;
     this.state = 'starting'; // starting | working | idle | exited
@@ -101,17 +104,40 @@ export class Runner extends EventEmitter {
     this.lastText = '';
     this.pendingTools = new Map(); // tool_use_id -> { name, input, at }
     this.recentTools = [];
-    this.transcript = []; // { role, kind, text, turn, at }
-    this.turn = 0;
+    /**
+     * 나눈 말. 대화 자체는 CLI 가 자기 파일에 적어 두므로 --resume 으로
+     * 되살아나지만, **화면에 보여줄 기록**은 우리 것이라 우리가 적어 둬야 한다.
+     * 이게 없으면 되살아난 사람은 다 기억하는데 대화창만 텅 비어 있다.
+     */
+    this.transcript = opts.resume ? readJsonl(this.transcriptFile, 400) : [];
+    // 다음 턴부터 새 묶음. 이어 붙인 대화의 마지막 턴에 새 말이 섞이면
+    // 화면에서 한 턴처럼 뭉쳐 보인다.
+    this.turn = (this.transcript.at(-1)?.turn ?? -1) + 1;
     this._buf = '';
     this._partial = '';
     this.phase = null;   // thinking | writing | tool | null
-    this._resuming = false;
+    this._resuming = !!opts.resume;
     this._restarting = false;
+  }
+
+  /** 화면용 대화 기록이 쌓이는 곳. 사람 한 명당 하나. */
+  get transcriptFile() {
+    return path.join(SESSIONS_DIR, this.personId, '.crew', 'transcript.jsonl');
   }
 
   get alive() {
     return !!this.child && this.child.exitCode === null && !this.child.killed;
+  }
+
+  /**
+   * 인사도 못 하고 죽었다 — init 이 한 번도 오지 않았다.
+   *
+   * 이어 붙이기가 실패하는 모양이 늘 이것이다(붙을 대화가 없으면 CLI 는
+   * 곧장 죽는다). 되살리기가 이 신호로 새 대화 전환을 판단하고, 활동 기록은
+   * 이걸 보고 "비정상 종료" 라고 겁주지 않는다 — 곧 복구되기 때문이다.
+   */
+  get stillborn() {
+    return this._resuming && !this.init;
   }
 
   /**
@@ -272,6 +298,30 @@ export class Runner extends EventEmitter {
     return this;
   }
 
+  /**
+   * 이어 붙이기가 실패했을 때, 같은 자리에서 새 대화로 다시 시작한다.
+   *
+   * `--resume` 은 CLI 가 자기 파일에 적어 둔 대화를 찾아 붙는 것이라, 그 파일이
+   * 사라졌거나(사용자가 지웠거나 다른 PC 로 옮겼거나) 하면 붙을 데가 없다.
+   * 그 경우 CLI 는 init 도 못 내보내고 곧장 죽는다 — 그러니 "한 마디도 못 하고
+   * 죽었다" 가 곧 그 신호다. 자리를 비워 두는 것보다 기억만 없는 채로 앉아
+   * 있는 편이 낫다. 무엇이 일어났는지는 활동 기록이 말한다.
+   */
+  startFresh() {
+    this.sessionId = randomUUID();
+    this._resuming = false;
+    this.transcript = [];
+    this.turn = 0;
+    this.init = null;
+    this.stderr = '';
+    this._buf = '';
+    this._partial = '';
+    this.state = 'starting';
+    this._spawn(this.buildArgs(), { viaShell: false });
+    this.emit('change');
+    return this;
+  }
+
   _onStdout(chunk) {
     this._buf += chunk.toString('utf8');
     let i;
@@ -373,8 +423,13 @@ export class Runner extends EventEmitter {
    * which remark that was.
    */
   _push(entry) {
-    this.transcript.push({ ...entry, turn: this.turn, at: Date.now() });
+    const row = { ...entry, turn: this.turn, at: Date.now() };
+    this.transcript.push(row);
     if (this.transcript.length > 400) this.transcript.splice(0, this.transcript.length - 400);
+    // 도구 하나가 200KB 짜리 파일을 통째로 넘기는 일이 있다. 화면에서 접어 둔
+    // 카드 하나 때문에 기록 파일이 그만큼 불어나느니, 그 줄만 인자를 뺀다.
+    const line = JSON.stringify(row);
+    appendJsonl(this.transcriptFile, line.length > 8000 ? { ...row, input: null, big: true } : row);
   }
 
   _write(text) {

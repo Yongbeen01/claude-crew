@@ -1995,25 +1995,25 @@ function renderUpdate() {
   el.updateBar.hidden = !u?.behind || updateDismissed;
   if (el.updateBar.hidden) return;
   el.updateText.textContent = '새 버전이 있습니다. 받기를 누르면 받아서 자동으로 다시 시작합니다 — '
-    + '업무 이력과 유형 설정은 그대로 남습니다.';
+    + '앉아 있는 사람들은 나눈 대화 그대로 자리로 돌아옵니다.';
 }
 
 el.updateHide.addEventListener('click', () => { updateDismissed = true; renderUpdate(); });
 
 el.updateApply.addEventListener('click', async () => {
   /*
-   * 받기는 앱을 다시 켠다. 앉아 있는 사람이 있으면 그 세션이 거기서 끝나고
-   * 나눈 대화도 사라진다 (세션은 앱보다 오래 살 수 없다). 묻지 않고 그렇게
-   * 하면, 일 시켜 놓고 잠깐 자리 비운 사람이 돌아와서 텅 빈 방을 본다.
+   * 받기는 앱을 다시 켠다. 이제 앉아 있는 사람들은 나눈 대화를 그대로 들고
+   * 자리로 돌아오지만(crew.revive), **지금 돌고 있는 턴**은 거기서 끊긴다 —
+   * 쓰던 파일은 쓰다 만 채로 남는다. 그래서 일하는 사람이 있을 때만 묻는다.
    */
-  const seated = store.crew.filter((p) => p.state !== 'exited' && p.state !== 'offline');
-  if (seated.length) {
-    const who = seated.map((p) => p.name).slice(0, 4).join(', ');
+  const busy = store.crew.filter((p) => p.state === 'working' || p.state === 'starting');
+  if (busy.length) {
+    const who = busy.map((p) => p.name).slice(0, 4).join(', ');
     const ok = confirm(
-      `지금 ${seated.length}명이 앉아 있습니다 (${who}${seated.length > 4 ? ' 외' : ''}).\n\n`
-      + '받으면 앱이 다시 시작하면서 이 사람들이 모두 나가고, 나눈 대화도 사라집니다.\n'
-      + '쌓아 둔 업무 이력·지침·유형 설정·창 그룹은 그대로 남습니다.\n\n'
-      + '지금 받을까요? (나중에 눌러도 됩니다)',
+      `지금 ${busy.length}명이 일하는 중입니다 (${who}${busy.length > 4 ? ' 외' : ''}).\n\n`
+      + '받으면 앱이 다시 시작합니다. 이 사람들은 나눈 대화 그대로 자리로 돌아와서\n'
+      + '하던 일을 이어서 합니다 — 다만 지금 돌고 있는 것은 중간에 한 번 끊깁니다.\n\n'
+      + '지금 받을까요? (일이 끝난 뒤에 눌러도 됩니다)',
     );
     if (!ok) return;
   }
