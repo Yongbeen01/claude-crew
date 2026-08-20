@@ -3,7 +3,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { DATA_DIR } from './config.js';
 import { bus, logActivity } from './bus.js';
-import { captureWindows, launchItems, desktopState } from './desktop.js';
+import { captureWindows, launchItems, desktopState, showWindows, refreshDesktop } from './desktop.js';
 import * as groups from './groups.js';
 
 /**
@@ -271,38 +271,59 @@ export async function openSaved(id) {
   if (!g) throw new Error('unknown saved group');
 
   const open = desktopState().people ?? [];
-  const openTitles = new Set(open.map((p) => `${p.app}|${p.name}`));
+  const byKey = new Map(open.map((p) => [p.key, p]));
+  const bySig = new Map(open.filter((p) => p.sig).map((p) => [p.sig, p]));
+  const byTitle = new Map(open.map((p) => [`${p.app}|${p.name}`, p]));
   const openApps = new Set(open.map((p) => p.app));
 
-  const wanted = g.items.filter((it) => {
-    // That exact window is back already.
-    if (openTitles.has(`${it.app}|${it.title}`)) return false;
+  /*
+   * 숨겨 둔 창은 "이미 열려 있다" 가 아니다.
+   *
+   * 숨기기는 최소화라 창은 그대로 살아 있고 목록에도 남는다. 예전에는 그걸
+   * 보고 전부 걸러 낸 다음 "이미 다 열려 있습니다" 라고만 하고 아무것도 하지
+   * 않았다 — 숨겨 놓고 다시 부르면 아무 일도 안 일어났다.
+   *
+   * 살아 있는 창은 **올린다**(showWindows), 없는 것만 새로 연다.
+   */
+  const present = [];
+  const wanted = [];
+  for (const it of g.items) {
+    const found = (it.key && byKey.get(it.key))
+      || (it.sig && bySig.get(it.sig))
+      || byTitle.get(`${it.app}|${it.title}`);
+    if (found) { present.push(found); continue; }
     // We know *what* to open — a page or a document — so open it even though
     // its program is running; it becomes another tab or another document.
-    if (it.url || it.doc) return true;
+    if (it.url || it.doc) { wanted.push(it); continue; }
     // All we have is "run this program", and it is already running. Starting a
     // second empty copy of it helps nobody.
-    return !openApps.has(it.app);
-  });
-
-  if (!wanted.length) {
-    logActivity('info', `${g.name} — 이미 다 열려 있습니다`);
-    return { ok: true, count: 0, skipped: g.items.length, failed: [] };
+    if (!openApps.has(it.app)) wanted.push(it);
   }
 
-  const res = await launchItems(wanted);
+  // 한 창에 이 그룹의 탭이 여럿일 수 있다 — 창은 한 번만 올리면 된다.
+  const hwnds = [...new Set(present.map((p) => p.hwnd).filter(Number.isFinite))];
+  const shown = hwnds.length ? await showWindows(hwnds) : { count: 0 };
+  const raised = shown?.count ?? 0;
+
+  const res = wanted.length ? await launchItems(wanted) : { ok: true, count: 0 };
   const failed = res?.failed ?? [];
-  const count = res?.count ?? 0;
+  const launched = res?.count ?? 0;
+  const count = raised + launched;
+
+  if (raised || launched) await refreshDesktop();
+
   logActivity(
     failed.length ? 'error' : 'info',
     failed.length
       ? `${g.name} 열기 — ${count}개 열고 ${failed.length}개 실패: ${failed.slice(0, 2).join(', ')}`
-      : `${g.name} 열기 — ${count}개`,
+      : `${g.name} 열기 — ${count}개${raised && launched ? ` (올림 ${raised} · 새로 ${launched})` : ''}`,
   );
   return {
-    ok: !!res?.ok,
+    ok: res?.ok !== false,
     count,
-    skipped: g.items.length - wanted.length,
+    raised,
+    launched,
+    skipped: g.items.length - present.length - wanted.length,
     failed,
     error: res?.error ?? null,
   };
