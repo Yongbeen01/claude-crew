@@ -19,6 +19,20 @@ const BRANCH = process.env.CREW_BRANCH || 'main';
 
 let status = { current: null, latest: null, behind: false, checkedAt: 0, error: '' };
 
+/**
+ * 사무실 쪽으로 나 있는 창구.
+ *
+ * update.js 가 crew.js 를 직접 부르면 "받기" 가 사무실을 알게 되고 그 반대도
+ * 되어 서로 물린다. 필요한 건 세 가지 사실뿐이라 index.js 가 끼워 넣는다.
+ */
+let office = { busy: () => 0, seated: () => 0, shutdown: () => {} };
+export function bindOffice(hooks) {
+  office = { ...office, ...hooks };
+}
+
+/** 같은 실패를 30분마다 다시 적지 않기 위해. */
+let lastAutoError = '';
+
 function version() {
   if (status.current) return status.current;
   try {
@@ -40,7 +54,15 @@ function run(cmd, args, opts = {}) {
 const isGitCheckout = () => fs.existsSync(path.join(ROOT, '.git'));
 
 export function updateStatus() {
-  return { ...status, current: version(), repo: REPO, branch: BRANCH, git: isGitCheckout() };
+  return {
+    ...status,
+    current: version(),
+    repo: REPO,
+    branch: BRANCH,
+    git: isGitCheckout(),
+    // 화면이 띠 문구를 고르는 데 쓴다 — 알아서 받는 중인지, 눌러야 하는지.
+    auto: config.autoUpdate !== false && canRestart(),
+  };
 }
 
 /**
@@ -69,7 +91,57 @@ export async function checkForUpdate() {
     status.behind = false;
   }
   bus.emit('update', updateStatus());
+  await maybeAutoUpdate();
   return updateStatus();
+}
+
+/**
+ * 물어보지 않고 받아서 다시 켠다.
+ *
+ * 왜 물어보지 않아도 되게 됐는가: 예전에는 받기가 앉아 있던 사람들을 통째로
+ * 끝냈다. 그래서 사람이 눌러야 했고, 안 누르면 그 컴퓨터만 옛 버전으로 굳었다.
+ * 이제는 대화 그대로 돌아오므로(crew.revive) 눈치채지 못하는 사이에 지나가도
+ * 되는 일이 됐다.
+ *
+ * 그래도 **일하는 사람이 있으면 손대지 않는다.** 대화는 돌아와도 지금 돌고
+ * 있는 그 턴은 못 살리기 때문이다 — 다음 차례(30분 뒤)에 다시 본다.
+ */
+async function maybeAutoUpdate() {
+  if (config.autoUpdate === false || !status.behind) return;
+  // 받아만 놓고 스스로 못 켜면 돌고 있는 건 여전히 옛 코드다. 그건 조용히
+  // 할 일이 아니라 사람에게 말할 일이라, 띠를 띄운 채로 둔다.
+  if (!canRestart()) return;
+  if (office.busy() > 0) return;
+
+  const result = await applyAndRestart();
+  if (result.ok) return;
+  if (result.error && result.error !== lastAutoError) {
+    lastAutoError = result.error;
+    logActivity('error', `새 버전을 못 받았습니다 — ${result.error}`);
+  }
+}
+
+/**
+ * 받고, 앉은 사람들을 곱게 정리하고, 스스로 다시 켠다.
+ *
+ * 받기 버튼과 자동 업데이트가 **같은 이 길**을 지난다. 두 갈래로 두면 한쪽만
+ * 고쳐지고, 그 한쪽은 아무도 안 눌러 보는 쪽이다.
+ */
+export async function applyAndRestart() {
+  const result = await applyUpdate();
+  if (!result.ok) return { ...result, restarting: false, revived: 0 };
+  // 다시 켜기 전에 앉아 있는 사람들을 직접 정리한다. 재시작은 우리를 강제
+  // 종료하므로 평소의 유예 시간이 돌기 전에 우리가 먼저 죽고, 그러면 claude
+  // 프로세스가 부모 없이 남는다 (실제로 하나 남는 걸 봤다).
+  //
+  // 즉시 죽이지는 않는다. 이 사람들은 다시 켜지면 그대로 돌아오는데, 이어
+  // 붙일 대화는 CLI 가 자기 파일에 적는 것이라 적을 틈은 줘야 한다. stdin 을
+  // 닫고 1.5초 뒤 트리를 걷어내고, 그 다음에 앱을 다시 켠다 — 순서가 바뀌면
+  // 다시 고아 프로세스다.
+  const seated = office.seated();
+  office.shutdown();
+  const restarting = restartApp({ delayMs: 2200 });
+  return { ...result, restarting, revived: seated };
 }
 
 /**
@@ -163,7 +235,8 @@ export function restartApp({ delayMs = 700 } = {}) {
 export function startUpdatePolling() {
   if (config.checkUpdates === false) return () => {};
   checkForUpdate();
-  const t = setInterval(checkForUpdate, 6 * 60 * 60 * 1000);
+  const every = Math.max(60_000, Number(config.updatePollMs) || 30 * 60 * 1000);
+  const t = setInterval(checkForUpdate, every);
   t.unref?.();
   return () => clearInterval(t);
 }

@@ -3,9 +3,11 @@ import { config, baseUrl, ensureDirs, DATA_DIR } from './config.js';
 import { createServer } from './server.js';
 import { seedPersonas, listPersonas } from './personas.js';
 import { startUsagePolling } from './usage.js';
-import { shutdownAll, poke, all as allCrew, setSummary, revive } from './crew.js';
+import {
+  shutdownAll, poke, all as allCrew, setSummary, revive, seatedCount, busyCount,
+} from './crew.js';
 import { refreshSummaries } from './summarize.js';
-import { startUpdatePolling } from './update.js';
+import { startUpdatePolling, bindOffice } from './update.js';
 import { ensureToolbox } from './toolbox.js';
 import { startDesktopPolling, shutdownDesktop } from './desktop.js';
 import * as timers from './timers.js';
@@ -45,6 +47,8 @@ server.listen(config.port, config.host, () => {
   // Nameplate captions. Cheap, throttled, and skipped for anyone already
   // showing a job name.
   setInterval(() => refreshSummaries(allCrew(), setSummary), 15_000).unref?.();
+  // 새 버전은 조용히 알아서 받는다 — 단, 일하는 사람이 하나도 없을 때만.
+  bindOffice({ busy: busyCount, seated: seatedCount, shutdown: shutdownAll });
   startUpdatePolling();
   // 이 컴퓨터에 열려 있는 창·탭 — 오피스 오른쪽 구역에 앉는 사람들.
   startDesktopPolling();

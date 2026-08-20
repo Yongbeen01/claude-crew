@@ -603,6 +603,20 @@ export function seatedCount() {
   return [...people.values()].filter((p) => p.runner?.alive).length;
 }
 
+/**
+ * 지금 앱을 다시 켜면 **뭔가를 잃는** 사람 수.
+ *
+ * 앉아 있다고 다 해당하는 게 아니다 — 자고 있는 사람은 다시 켜도 대화 그대로
+ * 돌아오니 잃을 게 없다. 잃는 쪽은 돌던 턴이 끊기는 사람(working·starting),
+ * 클릭을 기다리느라 도구가 붙들려 있는 사람(awaiting_approval), 그리고
+ * 인수인계를 쓰는 중인 사람(leaving)이다. 조용한 자동 업데이트가 "지금은
+ * 아니다" 를 판단하는 유일한 기준.
+ */
+export function busyCount() {
+  const held = ['working', 'starting', 'awaiting_approval', 'leaving'];
+  return [...people.values()].filter((p) => held.includes(p.state)).length;
+}
+
 /** Everyone currently seated — used by the summariser. */
 export function all() {
   return [...people.values()];

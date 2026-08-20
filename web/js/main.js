@@ -1994,8 +1994,14 @@ function renderUpdate() {
 
   el.updateBar.hidden = !u?.behind || updateDismissed;
   if (el.updateBar.hidden) return;
-  el.updateText.textContent = '새 버전이 있습니다. 받기를 누르면 받아서 자동으로 다시 시작합니다 — '
-    + '앉아 있는 사람들은 나눈 대화 그대로 자리로 돌아옵니다.';
+  // 알아서 받는 설정이면 이 띠는 "지금 일하는 사람이 있어서 기다리는 중" 일
+  // 때만 보인다 — 아무도 안 하고 있으면 눌러 볼 새도 없이 지나가기 때문이다.
+  // 그러니 재촉이 아니라 사정 설명이어야 한다.
+  el.updateText.textContent = u?.auto
+    ? '새 버전이 있습니다. 지금 일하는 사람이 있어 끝나면 알아서 받습니다 — '
+      + '지금 바로 받으려면 받기를 누르세요. 앉아 있는 사람들은 나눈 대화 그대로 돌아옵니다.'
+    : '새 버전이 있습니다. 받기를 누르면 받아서 자동으로 다시 시작합니다 — '
+      + '앉아 있는 사람들은 나눈 대화 그대로 자리로 돌아옵니다.';
 }
 
 el.updateHide.addEventListener('click', () => { updateDismissed = true; renderUpdate(); });
