@@ -674,9 +674,11 @@ export function revive() {
 
     people.set(person.id, person);
     wireRunner(person);
-    // 붙을 대화가 없으면 CLI 는 init 도 못 내보내고 죽는다. 그때만 새 대화로.
+    // 붙을 대화가 없으면 CLI 는 뜨자마자 죽는다. 그때만 새 대화로 — 판정은
+    // runner.stillborn 이 한다. "init 이 안 왔다" 만 보면 안 되는 이유가
+    // 거기 적혀 있다(멀쩡한 대화를 버리게 된다).
     person.runner.once('exit', () => {
-      if (person.runner.init || !people.has(person.id)) return;
+      if (!person.runner.stillborn || !people.has(person.id)) return;
       logActivity('spawn', `${person.name} — 지난 대화를 찾지 못해 새로 시작합니다`, person.id);
       person.runner.startFresh();
       persist();

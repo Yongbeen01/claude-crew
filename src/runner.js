@@ -10,6 +10,10 @@ import { claudeBin } from './tools.js';
 
 const isWin = process.platform === 'win32';
 
+/** 이어 붙이기의 성패가 갈리는 시간. 실패는 뜨자마자 일어난다 — 이보다
+ *  한참 뒤의 종료는 이어붙이기와 무관한 일이다. */
+const RESUME_WINDOW_MS = 20_000;
+
 /**
  * One long-lived `claude` child process per person.
  *
@@ -118,6 +122,9 @@ export class Runner extends EventEmitter {
     this.phase = null;   // thinking | writing | tool | null
     this._resuming = !!opts.resume;
     this._restarting = false;
+    /** 우리가 내보내는 중 — 그 종료는 사고가 아니다 */
+    this._stopping = false;
+    this._startedAt = 0;
   }
 
   /** 화면용 대화 기록이 쌓이는 곳. 사람 한 명당 하나. */
@@ -130,14 +137,26 @@ export class Runner extends EventEmitter {
   }
 
   /**
-   * 인사도 못 하고 죽었다 — init 이 한 번도 오지 않았다.
+   * 이어 붙이기가 **방금** 실패했다.
    *
-   * 이어 붙이기가 실패하는 모양이 늘 이것이다(붙을 대화가 없으면 CLI 는
-   * 곧장 죽는다). 되살리기가 이 신호로 새 대화 전환을 판단하고, 활동 기록은
-   * 이걸 보고 "비정상 종료" 라고 겁주지 않는다 — 곧 복구되기 때문이다.
+   * 붙을 대화가 없으면 CLI 는 init 도 못 내보내고 곧장 죽는다. 되살리기가 이
+   * 신호로 새 대화 전환을 판단하고, 활동 기록은 이걸 보고 "비정상 종료" 라고
+   * 겁주지 않는다 — 곧 복구되기 때문이다.
+   *
+   * "init 이 안 왔다" 만으로 판정하면 안 된다. stream-json 입력 모드의 CLI 는
+   * 첫 지시를 읽어야 init 을 내보내므로, 되살렸는데 말을 안 건 사람은 **평생**
+   * init 이 없다. 그 상태에서 앱을 다시 켜려고 stdin 을 닫으면 그 정상 종료가
+   * 이어붙이기 실패로 읽혀서, 멀쩡한 대화를 버리고 빈 대화로 갈아탄다 —
+   * 실제로 그렇게 두 사람의 대화를 날려 보고 알았다.
+   *
+   * 그래서 두 가지로 좁힌다: 우리가 내보내는 중이 아닐 것, 그리고 뜬 직후일 것.
+   * 진짜 실패는 언제나 뜨자마자 일어난다.
    */
   get stillborn() {
-    return this._resuming && !this.init;
+    return this._resuming
+      && !this.init
+      && !this._stopping
+      && Date.now() - this._startedAt < RESUME_WINDOW_MS;
   }
 
   /**
@@ -223,6 +242,7 @@ export class Runner extends EventEmitter {
     linkInto(this.workdir);
     // 이 유형이 쓰는 도구 스크립트 (받아쓰기 등)를 손 닿는 곳에 둔다.
     equipTools(this.workdir, this.persona?.toolbox ?? []);
+    this._startedAt = Date.now();
     this._spawn(this.buildArgs(), { viaShell: false });
     /**
      * 이어 붙인 세션은 뜨는 중이 아니라 **이미 있던 대화로 돌아온 것**이다.
@@ -329,8 +349,11 @@ export class Runner extends EventEmitter {
     this.stderr = '';
     this._buf = '';
     this._partial = '';
-    this.state = 'starting';
+    this._startedAt = Date.now();
     this._spawn(this.buildArgs(), { viaShell: false });
+    // 되살릴 때와 같은 이유로 idle 이다 — 아무도 말을 걸지 않으면 init 이
+    // 오지 않고, starting 인 채로 두면 쉬는 사람이 일하는 척을 한다.
+    this.state = 'idle';
     this.emit('change');
     return this;
   }
@@ -484,6 +507,7 @@ export class Runner extends EventEmitter {
    *   claude 프로세스가 부모 없이 계속 살아남는다(측정으로 확인).
    */
   stop({ immediate = false } = {}) {
+    this._stopping = true;
     if (!this.child) return;
     try { this.child.stdin.end(); } catch { /* already closed */ }
     const child = this.child;
