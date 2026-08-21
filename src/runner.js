@@ -14,6 +14,9 @@ const isWin = process.platform === 'win32';
  *  한참 뒤의 종료는 이어붙이기와 무관한 일이다. */
 const RESUME_WINDOW_MS = 20_000;
 
+/** 중단 요청에 CLI 가 대답할 때까지 기다려 주는 시간. 넘기면 프로세스를 간다. */
+const INTERRUPT_GRACE_MS = 8000;
+
 /**
  * One long-lived `claude` child process per person.
  *
@@ -299,8 +302,16 @@ export class Runner extends EventEmitter {
       // A restart tears the process down on purpose — that is not the person
       // leaving, so don't report it as an exit.
       if (this._restarting) return;
+      // 죽을 때 일하는 중이었나. 이게 곧 "하던 일이 있었다" 는 뜻이라,
+      // 다시 앉힌 뒤 이어서 하라고 말을 걸지 말지가 여기서 갈린다. state 를
+      // 덮어쓰기 **전에** 봐 두지 않으면 그 사실은 사라진다.
+      const wasWorking = this.state === 'working' || this.state === 'starting';
       this.state = 'exited';
-      this.emit('exit', { code, error: code === 0 ? null : this.stderr.slice(-500) || null });
+      this.emit('exit', {
+        code,
+        error: code === 0 ? null : this.stderr.slice(-500) || null,
+        wasWorking,
+      });
     });
   }
 
@@ -436,7 +447,19 @@ export class Runner extends EventEmitter {
         this._partial = '';
         this._setPhase(null);
         this.turn += 1; // everything pushed from here on belongs to the next turn
-        this.emit('result', ev);
+        // 우리가 끊은 턴은 실패가 아니다. CLI 는 중단도 is_error 로 끝내므로,
+        // 이 표시가 없으면 사람이 누른 "중단" 이 활동 기록에 "턴 실패" 로 남는다.
+        const stopped = this._interrupting;
+        this._interrupting = false;
+        clearTimeout(this._interruptTimer);
+        this.emit('result', { ...ev, stopped });
+        break;
+      }
+
+      // 중단 요청에 대한 대답. 여기까지 왔다는 것은 CLI 가 요청을 받았다는
+      // 뜻이라, 프로세스를 갈아 끼우는 뒷수습은 안 해도 된다.
+      case 'control_response': {
+        if (ev.response?.subtype === 'success') clearTimeout(this._interruptTimer);
         break;
       }
 
@@ -522,6 +545,44 @@ export class Runner extends EventEmitter {
     this.emit('undelivered', { text: body, hidden });
     this.emit('change');
     return false;
+  }
+
+  /**
+   * 돌고 있는 턴을 중간에 끊는다. 보통의 세션에서 Esc 로 하는 그 일이다.
+   *
+   * 프로세스를 죽이지 않는다 — stdin 으로 control_request 를 하나 보내면 CLI 가
+   * 하던 턴을 접고 다음 지시를 기다린다. 대화도 그대로 남는다
+   * (scripts/spike/4-interrupt.mjs 로 실증: control_response success → 프로세스
+   * 생존 → 다음 말이 통함).
+   *
+   * 다만 끊긴 턴에서 하던 말은 문맥에 남지 않는다. 그래서 "이어서 해" 만으로는
+   * 부족하고, 뭘 하다 말았는지는 사람이 다시 일러 줘야 한다.
+   *
+   * 대답이 없을 때를 대비해 시한을 건다. 중단 버튼이 아무 일도 안 하는 것이
+   * 이 기능 최악의 실패라, 그때는 프로세스를 갈아 끼워서라도 멈춘다.
+   */
+  interrupt() {
+    if (!this.alive || this.state !== 'working') return false;
+    this._interrupting = true;
+    const req = {
+      type: 'control_request',
+      request_id: `req_${randomUUID()}`,
+      request: { subtype: 'interrupt' },
+    };
+    try {
+      this.child.stdin.write(`${JSON.stringify(req)}\n`);
+    } catch {
+      this._interrupting = false;
+      return false;
+    }
+    clearTimeout(this._interruptTimer);
+    this._interruptTimer = setTimeout(() => {
+      if (this.state !== 'working') return;
+      this.emit('stop-fallback');
+      this.restart();
+    }, INTERRUPT_GRACE_MS);
+    this._interruptTimer.unref?.();
+    return true;
   }
 
   /**

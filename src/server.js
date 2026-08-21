@@ -304,6 +304,12 @@ export function createServer() {
       }
       if (!sub) return json(res, 200, person.toJSON());
 
+      // 하던 일만 멈춘다. 자리도 대화도 그대로 — 바로 다음 지시를 줄 수 있다.
+      if (sub === 'stop' && req.method === 'POST') {
+        const r = crew.stop(id);
+        return json(res, r.ok ? 200 : 400, r);
+      }
+
       if (sub === 'send' && req.method === 'POST') {
         const body = await readBody(req);
         const text = String(body.text ?? '').trim();

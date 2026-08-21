@@ -85,9 +85,30 @@ claude-office 는 `PermissionRequest` 훅의 HTTP 응답을 붙잡아 승인 UI 
 `{hookSpecificOutput:{hookEventName:'PreToolUse', permissionDecision, permissionDecisionReason}}`
 를 응답 바디로 돌려준다.
 
-부수 효과: 훅이 **모든** 도구에 걸리므로 읽기 계열(`Read`/`Glob`/`Grep`/`Skill` 등)과 오피스 자체
-도구는 훅 안에서 자동 허용한다(`config.autoAllowTools`). 안 그러면 파일 하나 읽을 때마다
-클릭을 요구해서 쓸 수 없다.
+부수 효과: 훅이 **모든** 도구에 걸리므로 무엇을 물어볼지는 훅 안에서 가려야 한다. 지금은
+기본이 허용이고 `src/risk.js` 가 위험하다고 본 것만 카드가 된다 — 되돌리기 어려운 변경,
+자격·개인정보 파일, 환경변수 노출. 안 그러면 파일 하나 읽을 때마다 클릭을 요구해서 쓸 수 없다.
+
+## 5. 돌던 턴을 중간에 끊을 수 있다 (`control_request` / `interrupt`) — PASS
+
+`node scripts/spike/4-interrupt.mjs`
+
+사무실에는 "보내기" 밖에 없어서 한 번 시킨 일은 끝날 때까지 기다리는 수밖에 없었다.
+보통의 세션에서 Esc 로 하는 그 일이 헤드리스에서도 되는지가 질문이었고, 된다:
+
+- stdin 에 `{"type":"control_request","request_id":"…","request":{"subtype":"interrupt"}}`
+- CLI 가 `control_response` 로 `subtype: "success"` 를 돌려준다
+- 돌던 턴은 `result` 의 `subtype: "error_during_execution"` 으로 끝난다
+  (→ **중단도 `is_error: true` 다.** 우리가 끊은 것과 진짜 실패를 앱이 따로 표시해야
+  사람이 누른 버튼이 사고처럼 보이지 않는다)
+- **프로세스는 살아 있고, 다음 말이 그대로 통한다** — 대화를 잃지 않는다
+
+한 가지 주의: 끊긴 턴에서 하던 말은 **문맥에 남지 않는다**. 끊고 나서 "방금 어디까지
+셌냐" 고 물었더니 "아직 시작하지 않았습니다" 라고 답했다. 그래서 이어서 시킬 때는
+무엇을 하다 말았는지 사람이 다시 일러 줘야 한다.
+
+→ `runner.js` 의 `interrupt()`, `crew.js` 의 `stop()`, 화면의 "중단" 버튼.
+대답이 없을 때를 대비해 8초 시한을 걸고, 넘기면 프로세스를 갈아 끼운다.
 
 ## 공통으로 확인된 것
 

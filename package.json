@@ -14,7 +14,7 @@
     "hooks:install": "node src/installHooks.js install",
     "hooks:uninstall": "node src/installHooks.js uninstall",
     "hooks:status": "node src/installHooks.js status",
-    "spike": "node scripts/spike/1-stream-input.mjs && node scripts/spike/2-plugin-skills.mjs && node scripts/spike/3-app-mcp.mjs"
+    "spike": "node scripts/spike/1-stream-input.mjs && node scripts/spike/2-plugin-skills.mjs && node scripts/spike/3-app-mcp.mjs && node scripts/spike/4-interrupt.mjs"
   },
   "dependencies": {}
 }

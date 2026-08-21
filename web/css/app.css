@@ -818,6 +818,15 @@ body:has(.update-bar:not([hidden])) .app { height: calc(100% - 40px); }
   font-size: 12px; font-weight: 600;
   box-shadow: inset 0 0 0 3px var(--bad-dark);
 }
+/* 이 화면이 알려 주는 말. 오류가 아니라 알림이므로 붉게 겁주지 않는다. */
+.msg.notice {
+  align-self: center;
+  background: var(--paper);
+  color: var(--ink-dim);
+  font-size: 12px; font-weight: 600;
+  box-shadow: inset 0 0 0 3px var(--line);
+  max-width: 90%;
+}
 /* 등장은 프레임 단위로 — 부드럽게 미끄러지지 않는다 */
 .msg.in { animation: msg-in 160ms steps(3, end) both; }
 .msg.user.in { animation-name: msg-in-right; }
@@ -1062,6 +1071,18 @@ body.resizing-v { cursor: row-resize; user-select: none; }
 }
 .composer textarea::placeholder { color: var(--ink-mute); }
 .composer textarea:focus { box-shadow: inset 0 0 0 3px var(--accent-dark), inset 0 0 0 6px var(--accent); }
+/* 보내기 위, 중단 아래. 중단은 일하는 중에만 나타나므로 평소엔 보내기 하나뿐. */
+.composer .send-col { display: grid; gap: 6px; align-content: stretch; }
+.composer .send-col > button { width: 100%; height: 100%; }
+.composer .send-col > button[hidden] { display: none; }
+/* 멈추는 버튼은 붉은 쪽으로. 승인 카드의 "거부" 와 같은 계열이라 처음 봐도 뜻이 산다. */
+.composer .stop {
+  background: var(--bad);
+  color: #fff5f0;
+  box-shadow: inset 0 0 0 3px var(--bad-dark), inset 0 3px 0 3px #ff9d84;
+}
+.composer .stop:hover { background: #d8553a; }
+.composer .stop:disabled { background: var(--bad); opacity: .55; }
 
 /* 버튼 — 위는 밝고 아래는 그늘진 나무 조각. 누르면 그림자만큼 내려앉는다. */
 button {

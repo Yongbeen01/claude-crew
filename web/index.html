@@ -122,7 +122,13 @@
         <div id="attachments" class="attachments"></div>
         <div class="row">
           <textarea id="prompt" rows="2" placeholder="시킬 일을 적으세요.  (Enter 전송 · Shift+Enter 줄바꿈)"></textarea>
-          <button type="submit" id="send">보내기</button>
+          <!-- 일하는 중에만 "중단" 이 옆에 섭니다. 보내기는 가리지 않습니다 —
+               일하는 중에 넣은 지시는 줄을 서서 이어 들어가므로, 멈추는 것과
+               덧붙이는 것은 둘 다 지금 할 수 있는 일입니다. -->
+          <div class="send-col">
+            <button type="submit" id="send">보내기</button>
+            <button type="button" id="stop" class="stop" hidden>중단</button>
+          </div>
         </div>
         <div class="row end">
           <label class="ghost tiny file-btn">

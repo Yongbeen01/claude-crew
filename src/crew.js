@@ -43,6 +43,8 @@ class Person {
     this.reviveCount = 0;
     /** "응답 없음" 을 이미 적었는가 — 30초마다 같은 말을 반복하지 않으려고. */
     this.stalledNoted = false;
+    /** 굳은 것으로 보고 이미 다시 띄웠는가 — 30초마다 다시 띄우지 않으려고. */
+    this.hungHandled = false;
   }
 
   get state() {
@@ -218,16 +220,33 @@ function wireRunner(person) {
   r.on('result', (ev) => {
     // The turn is over — the chat clears everything it was showing while the
     // person worked and keeps only the answer.
-    bus.emit('turn-end', { personId: person.id, isError: !!ev.is_error, at: Date.now() });
+    // 우리가 끊은 턴은 실패가 아니다 — 대화창이 붉은 실패 표시를 내걸면
+    // 사람이 방금 누른 버튼이 사고처럼 보인다.
+    bus.emit('turn-end', {
+      personId: person.id,
+      isError: !!ev.is_error && !ev.stopped,
+      stopped: !!ev.stopped,
+      at: Date.now(),
+    });
     // 턴을 무사히 마쳤다 = 진짜로 굴러간다. 되살리기 횟수를 여기서만 되돌린다
     // — 뜨기만 하면(init) 되돌리면, 매번 뜨자마자 죽는 사람이 영원히 되살아난다.
-    if (!ev.is_error) person.reviveCount = 0;
-    if (person.stalledNoted) person.stalledNoted = false;
-    if (ev.is_error && !r.stillborn) {
+    if (!ev.is_error || ev.stopped) person.reviveCount = 0;
+    person.stalledNoted = false;
+    person.hungHandled = false;
+    if (ev.stopped) {
+      logActivity('exit', `${person.name} — 하던 일을 중단했습니다`, person.id);
+    } else if (ev.is_error && !r.stillborn) {
       logActivity('error', `${person.name} — 턴 실패: ${String(ev.result ?? '').slice(0, 80)}`, person.id);
     }
     // Turn over: nothing can still be blocking on a decision.
     approvals.resolveAllFor(person.id, config.approvalFallbackDecision, 'turn-end');
+    announce();
+  });
+
+  // 중단 요청에 CLI 가 대답을 안 했다. 프로세스를 갈아 끼워서라도 멈춘 참이니
+  // 사람에게도 그렇게 말한다 — 버튼을 눌렀는데 조용한 것이 제일 나쁘다.
+  r.on('stop-fallback', () => {
+    logActivity('error', `${person.name} — 중단에 응답이 없어 세션을 다시 띄웁니다`, person.id);
     announce();
   });
 
@@ -238,7 +257,7 @@ function wireRunner(person) {
     announce();
   });
 
-  r.on('exit', ({ code, error }) => {
+  r.on('exit', ({ code, error, wasWorking }) => {
     // 이어 붙이기가 실패한 것뿐이면 곧 새 대화로 다시 앉는다 (revive). 그
     // 사이에 "비정상 종료" 를 적으면, 스스로 고쳐지는 일을 사고로 읽게 된다.
     if (r.stillborn) return;
@@ -249,20 +268,25 @@ function wireRunner(person) {
     );
     // 사고로 죽었으면 같은 대화 그대로 다시 앉힌다. 자리를 비워 두면 사람은
     // "이유 없이 멈췄다" 로만 본다.
-    if (code !== 0) reseat(person, String(error ?? code));
+    if (code !== 0) reseat(person, String(error ?? code), wasWorking);
     announce();
   });
 }
 
 /**
- * 예기치 않게 죽은 사람을 같은 대화에 다시 앉힌다.
+ * 예기치 않게 죽은 사람을 같은 대화에 다시 앉히고, **하던 일을 이어서 하게 한다**.
+ *
+ * 자리에 도로 앉히는 것만으로는 반쪽이다. 대화는 돌아오지만 끊긴 그 턴은
+ * 안 돌아와서, 사람이 대화창에 "계속 진행해" 를 손으로 쳐 줘야 다시 움직였다.
+ * 그 한 마디를 우리가 대신 건다 (RESUME_NUDGE — 무엇을 하다 말았는지 먼저
+ * 확인하고 이어서 하라는 말이라, 이미 끝낸 일을 다시 하지 않는다).
  *
  * 무한히 되살리면 안 된다. 자격이 만료됐거나 claude 가 깨졌으면 뜨자마자
  * 다시 죽으므로, 되살리기가 곧 무한 루프가 된다 — 그 루프는 조용하기까지
  * 해서 원인을 찾기가 더 나쁘다. 그래서 횟수를 세고, 다 쓰면 멈춘 채로 두고
  * **왜 멈춰 있는지**를 적는다. 성공한 턴이 하나 지나면 횟수는 되돌아간다.
  */
-function reseat(person, why) {
+function reseat(person, why, wasWorking = false) {
   if (person.leavingAt || !people.has(person.id)) return;
   const r = person.runner;
   if (!r || r.stopping) return;
@@ -278,53 +302,102 @@ function reseat(person, why) {
   const wait = config.reviveBackoffMs * person.reviveCount;
   logActivity('spawn',
     `${person.name} — 다시 앉힙니다 (${person.reviveCount}/${config.reviveMaxAttempts})`, person.id);
-  const t = setTimeout(() => {
+  const t = setTimeout(async () => {
     if (person.leavingAt || !people.has(person.id) || person.runner !== r || r.alive) return;
+    // 붙을 대화가 없어서 죽은 것이면 exit 핸들러가 stillborn 이라 그냥
+    // 지나간다 — 그러면 자리만 비고 아무 말도 안 남는다. revive() 와 같은
+    // 방식으로 여기서 받아 새 대화로 앉힌다. 그때는 이어서 할 것을 말해 주지
+    // 않는다: 기억이 통째로 없는 사람에게 "이어서" 는 지어내라는 말이 된다.
+    let fresh = false;
+    r.once('exit', () => {
+      if (!r.stillborn || !people.has(person.id) || person.runner !== r) return;
+      fresh = true;
+      logActivity('spawn', `${person.name} — 지난 대화를 찾지 못해 새로 시작합니다`, person.id);
+      r.startFresh();
+      announce();
+    });
     try {
-      r.restart();
-      // 붙을 대화가 없어서 죽은 것이면 exit 핸들러가 stillborn 이라 그냥
-      // 지나간다 — 그러면 자리만 비고 아무 말도 안 남는다. revive() 와 같은
-      // 방식으로 여기서 받아 새 대화로 앉힌다.
-      r.once('exit', () => {
-        if (!r.stillborn || !people.has(person.id) || person.runner !== r) return;
-        logActivity('spawn', `${person.name} — 지난 대화를 찾지 못해 새로 시작합니다`, person.id);
-        r.startFresh();
-        announce();
-      });
+      await r.restart();
     } catch (e) {
       logActivity('error', `${person.name} — 다시 앉히지 못했습니다: ${String(e.message).slice(0, 80)}`, person.id);
+      return;
     }
+    if (wasWorking && config.autoContinue && !fresh) continueWork(person);
     announce();
   }, wait);
   t.unref?.();
 }
 
+/** 끊긴 자리에서 이어서 하라고 말을 건다. 사람이 손으로 치던 그 한 마디. */
+function continueWork(person) {
+  if (!person.runner?.alive) return false;
+  logActivity('spawn', `${person.name} — 하던 일을 이어서 합니다`, person.id);
+  return person.runner.send(RESUME_NUDGE, { hidden: true });
+}
+
 /**
- * 굳어 있는 사람을 찾아 **말한다**. 죽이지는 않는다.
+ * 굳어 있는 사람을 찾는다.
  *
- * 10분짜리 빌드 하나가 여기 그대로 걸린다. 굳은 것과 오래 걸리는 것을 밖에서
- * 구별할 방법이 없으니, 끊는 판단은 화면 보는 사람에게 넘기고 우리는 사실만
- * 올린다 — 조용히 굳어 있는 것보다 굳었다고 적혀 있는 편이 언제나 낫다.
+ * 두 단계로 나눈 이유: 10분짜리 빌드 하나가 여기 그대로 걸린다. 굳은 것과
+ * 오래 걸리는 것을 밖에서 구별할 방법이 없어서, 먼저 **말만** 하고
+ * (stalledAfterMs) 사람이 볼 시간을 준다. 그러고도 한참을 아무 말이 없으면
+ * (hungAfterMs) 그때는 정말 굳은 것으로 보고 프로세스를 갈아 끼운 뒤 이어서
+ * 하게 한다 — 여기까지 왔는데 그냥 두면 그건 "굳었다고 적어 두기만 한" 것이다.
+ * 승인 카드를 기다리는 중이면 굳은 게 아니므로 건드리지 않는다.
  * (죽은 프로세스는 여기까지 오지 않는다. 그건 exit 이 잡아 되살린다.)
  */
 function sweepStalled() {
   let changed = false;
   for (const person of people.values()) {
     const r = person.runner;
-    const stalled = !!r?.alive && r.state === 'working'
-      && Date.now() - r.lastActivityAt > config.stalledAfterMs
-      && person.approvalCount === 0;
-    if (stalled === !!person.stalledNoted) continue;
-    person.stalledNoted = stalled;
-    changed = true;
-    if (stalled) {
-      const mins = Math.round((Date.now() - r.lastActivityAt) / 60000);
-      const tool = r.toJSON().currentTool;
-      logActivity('error',
-        `${person.name} — ${mins}분째 응답이 없습니다${tool ? ` (${tool} 실행 중)` : ''}`, person.id);
+    const silentFor = r?.alive && r.state === 'working' && person.approvalCount === 0
+      ? Date.now() - r.lastActivityAt
+      : 0;
+
+    const stalled = silentFor > config.stalledAfterMs;
+    if (stalled !== !!person.stalledNoted) {
+      person.stalledNoted = stalled;
+      changed = true;
+      if (stalled) {
+        const tool = r.toJSON().currentTool;
+        logActivity('error',
+          `${person.name} — ${Math.round(silentFor / 60000)}분째 응답이 없습니다${tool ? ` (${tool} 실행 중)` : ''}`,
+          person.id);
+      }
+    }
+
+    if (config.hungAfterMs > 0 && silentFor > config.hungAfterMs && !person.hungHandled) {
+      person.hungHandled = true;
+      changed = true;
+      unstick(person, Math.round(silentFor / 60000));
     }
   }
   if (changed) announce();
+}
+
+/** 정말 굳은 사람. 프로세스를 갈아 끼우고 하던 일을 이어서 하게 한다. */
+async function unstick(person, mins) {
+  const r = person.runner;
+  if (!r || r.stopping || person.leavingAt) return;
+
+  person.reviveCount = (person.reviveCount ?? 0) + 1;
+  if (person.reviveCount > config.reviveMaxAttempts) {
+    logActivity('error',
+      `${person.name} — 계속 굳습니다. 그대로 둡니다 (${mins}분째 응답 없음)`, person.id);
+    return;
+  }
+
+  logActivity('spawn', `${person.name} — ${mins}분째 응답이 없어 다시 띄웁니다`, person.id);
+  try {
+    await r.restart();
+  } catch (e) {
+    logActivity('error', `${person.name} — 다시 띄우지 못했습니다: ${String(e.message).slice(0, 80)}`, person.id);
+    return;
+  }
+  person.stalledNoted = false;
+  person.hungHandled = false;
+  if (config.autoContinue) continueWork(person);
+  announce();
 }
 
 const stallTimer = setInterval(sweepStalled, 30_000);
@@ -572,6 +645,28 @@ export function touch(id) {
   if (id && !people.has(id)) return false;
   announce();
   return true;
+}
+
+/**
+ * 하던 일을 중간에 멈춘다 — 보통의 세션에서 Esc 로 하는 그것.
+ *
+ * 내보내기(leave)와 다르다. 사람은 자리에 그대로 있고 대화도 그대로다;
+ * 멈추는 것은 **지금 돌고 있는 턴** 하나뿐이라, 바로 다음 지시를 이어서
+ * 줄 수 있다. 승인 카드를 기다리던 중이었다면 그 카드도 같이 접는다 —
+ * 아무도 기다리지 않는 카드를 남겨 두면 그게 다음 멈춤이 된다.
+ */
+export function stop(id) {
+  const person = people.get(id);
+  if (!person?.runner) return { ok: false, error: '없는 사람입니다' };
+  if (person.leavingAt) return { ok: false, error: '이미 나가는 중입니다' };
+  if (person.runner.state !== 'working') return { ok: false, error: '지금 하는 일이 없습니다' };
+
+  approvals.resolveAllFor(id, 'deny', 'stopped');
+  const ok = person.runner.interrupt();
+  logActivity(ok ? 'exit' : 'error',
+    ok ? `${person.name} — 중단을 요청했습니다` : `${person.name} — 중단하지 못했습니다`, id);
+  announce();
+  return ok ? { ok: true } : { ok: false, error: '중단 요청을 보내지 못했습니다' };
 }
 
 /**

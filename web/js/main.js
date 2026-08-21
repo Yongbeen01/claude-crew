@@ -55,6 +55,7 @@ const el = {
   chat: document.getElementById('chat'),
   chatTitle: document.getElementById('chat-title'),
   composer: document.getElementById('composer'),
+  stop: document.getElementById('stop'),
   prompt: document.getElementById('prompt'),
   send: document.getElementById('send'),
   dismiss: document.getElementById('dismiss'),
@@ -442,6 +443,16 @@ function renderChat() {
     ? '나가는 중입니다 — 남길 것을 정리하고 있어요.'
     : '시킬 일을 적으세요.  (Enter 전송 · Shift+Enter 줄바꿈)';
 
+  // 일하는 중에만 "중단" 이 뜬다. 할 수 없을 때 눌리는 버튼을 남겨 두면
+  // 그 버튼이 하는 말을 사람이 믿지 않게 된다.
+  //
+  // "보내기" 를 가리지는 않는다 — 일하는 중에 넣은 지시는 CLI 가 줄 세워
+  // 뒀다가 이어서 받는다. 멈추는 것과 덧붙이는 것은 서로 다른 일이고,
+  // 둘 다 지금 할 수 있는 일이다.
+  const working = person.state === 'working' && !leaving;
+  el.stop.hidden = !working;
+  if (working) el.stop.disabled = false;
+
   const msgs = store.chats.get(person.id) ?? [];
   const work = store.work.get(person.id);
 
@@ -611,6 +622,39 @@ el.composer.addEventListener('submit', async (e) => {
   } finally {
     el.send.disabled = false;
     el.prompt.focus();
+  }
+});
+
+/**
+ * 하던 일 멈추기. 사람은 자리에 그대로 있고 대화도 그대로다 — 멈추는 것은
+ * 지금 돌고 있는 턴 하나뿐이라, 바로 다음 지시를 이어서 줄 수 있다.
+ *
+ * 끊긴 턴에서 하던 말은 문맥에 남지 않는다(spike 4 로 확인). 그래서 "중단했다"
+ * 로 끝내지 않고 무엇을 하다 말았는지 다시 일러 달라고 적어 준다.
+ */
+el.stop.addEventListener('click', async () => {
+  const person = selectedPerson();
+  if (!person) return;
+  el.stop.disabled = true;
+  try {
+    const r = await api(`/api/crew/${person.id}/stop`, { method: 'POST' });
+    if (!r.ok) {
+      // 누르는 사이에 턴이 스스로 끝났을 뿐이면 아무 말도 하지 않는다 —
+      // 사람이 원한 결과(멈춰 있음)는 이미 이뤄졌는데 붉은 줄만 남기면
+      // 버튼이 고장난 것처럼 보인다.
+      if (!/하는 일이 없습니다/.test(r.error ?? '')) {
+        pushLocal(person.id, 'error', r.error ?? '중단하지 못했습니다.');
+      }
+      store.work.delete(person.id);
+      renderChat();
+      return;
+    }
+    store.work.delete(person.id);
+    pushLocal(person.id, 'notice', '중단했습니다. 하던 턴은 문맥에 남지 않으니, 이어서 시키실 때는 무엇을 하던 중이었는지 같이 적어 주세요.');
+    renderChat();
+    el.prompt.focus();
+  } finally {
+    el.stop.disabled = false;
   }
 });
 
