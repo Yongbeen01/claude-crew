@@ -1,6 +1,6 @@
 {
   "name": "claude-crew",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": false,
   "type": "module",
   "description": "여러 Claude 세션을 사람으로 띄워 일을 시키고 2D 픽셀 오피스로 지켜보는 개인 비서",

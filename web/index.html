@@ -42,6 +42,9 @@
     <div class="deck-wrap">
       <button type="button" id="deck-prev" class="deck-arrow prev" aria-label="맨 앞으로" hidden>◀</button>
       <button type="button" id="deck-next" class="deck-arrow next" aria-label="맨 끝으로" hidden>▶</button>
+      <!-- 지금 돌고 있는 버전. 화살표가 앉는 왼쪽 통로의 바닥 — 나무 바닥 위라
+           아무것도 가리지 않고, 물어볼 일이 생겼을 때 늘 같은 자리에 있습니다. -->
+      <small id="version" class="version" title="지금 돌고 있는 버전"></small>
     <div class="deck" id="deck">
       <section class="panel">
         <h2>남은 한도</h2>
@@ -101,7 +104,6 @@
       </div>
       <div class="chat-head">
         <h2 id="chat-title">대화</h2>
-        <small id="version"></small>
         <button type="button" id="open-types" class="ghost tiny" title="유형과 스킬 편집">유형</button>
         <!-- 클로드 계정. 누구로 로그인돼 있는지가 곧 버튼의 이름이다. -->
         <button type="button" id="auth-btn" class="ghost tiny" title="클로드 계정">계정</button>
