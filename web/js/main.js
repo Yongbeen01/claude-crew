@@ -59,7 +59,6 @@ const el = {
   send: document.getElementById('send'),
   dismiss: document.getElementById('dismiss'),
   watch: document.getElementById('watch'),
-  trust: document.getElementById('trust'),
   tuneModel: document.getElementById('tune-model'),
   tuneEffort: document.getElementById('tune-effort'),
   tuneNote: document.getElementById('tune-note'),
@@ -430,7 +429,6 @@ function renderChat() {
     : `${person.name} · ${person.personaLabel}`;
   el.composer.hidden = false;
   el.watch.checked = !!person.watch;
-  el.trust.checked = !!person.trusted;
   syncTuning(person);
 
   // On the way out the composer stays visible but takes nothing: a message sent
@@ -634,12 +632,6 @@ el.watch.addEventListener('change', async () => {
   const person = selectedPerson();
   if (!person) return;
   await api(`/api/crew/${person.id}/watch`, { method: 'POST', body: { on: el.watch.checked } });
-});
-
-el.trust.addEventListener('change', async () => {
-  const person = selectedPerson();
-  if (!person) return;
-  await api(`/api/crew/${person.id}/trust`, { method: 'POST', body: { on: el.trust.checked } });
 });
 
 // ── 이 사람이 쓰는 모델 · 생각 깊이 ────────────────────────────────────────
@@ -1267,10 +1259,13 @@ function renderApprovals() {
     const person = store.crew.find((p) => p.id === a.personId);
     const card = document.createElement('div');
     card.className = 'approval';
-    card.innerHTML = `<div class="who"></div><div class="what"></div><pre></pre>
+    card.innerHTML = `<div class="who"></div><div class="what"></div><div class="why"></div><pre></pre>
       <div class="acts"><button class="allow">허용</button><button class="deny">거부</button></div>`;
     card.querySelector('.who').textContent = person ? `${person.name} · ${person.personaLabel}` : '';
     card.querySelector('.what').textContent = a.title;
+    // 카드가 드물어진 만큼, 왜 이것만 물어보는지가 카드에 적혀 있어야 한다.
+    const why = card.querySelector('.why');
+    if (a.why) why.textContent = a.why; else why.remove();
     const pre = card.querySelector('pre');
     if (a.detail) pre.textContent = a.detail; else pre.remove();
     card.querySelector('.allow').addEventListener('click', () => decide(a.id, 'allow'));

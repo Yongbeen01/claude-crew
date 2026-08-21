@@ -1,14 +1,19 @@
 import { randomUUID } from 'node:crypto';
 import { config } from './config.js';
 import { bus, logActivity } from './bus.js';
+import { assess } from './risk.js';
 
 /**
  * Tool approvals.
  *
- * A session running headless has nobody to ask, so an unlisted tool is just
- * denied and the person reports that it "can't do that". We install a hook
- * pointing back here and **hold the hook's HTTP response open** until someone
- * clicks in the office; the decision is the response body.
+ * A session running headless has nobody to ask, so a held call is just a call
+ * that never happens until someone answers. We install a hook pointing back
+ * here and **hold the hook's HTTP response open** until someone clicks in the
+ * office; the decision is the response body.
+ *
+ * 기본은 **허용**이다. 카드가 뜨는 것은 risk.js 가 위험하다고 본 일뿐 —
+ * 되돌리기 어려운 변경, 자격·개인정보, 환경변수 노출. 왜 그렇게 두는지는
+ * risk.js 위쪽에 적어 두었다.
  *
  * The hook is `PreToolUse`, not `PermissionRequest`. Measured (see
  * scripts/spike/README.md): in `-p` mode `PermissionRequest` is never called at
@@ -21,12 +26,6 @@ import { bus, logActivity } from './bus.js';
 const pending = new Map();
 /** last N resolved approvals, for the history strip */
 const history = [];
-/**
- * People allowed to approve themselves. A long job shouldn't need forty clicks.
- * Memory only: it dies with the daemon and with the person, so nobody inherits
- * it by accident.
- */
-const trusted = new Set();
 /**
  * People on their way out. Their last turn is a handover — a statement, not
  * work — so any tool it reaches for is refused immediately instead of hanging
@@ -54,29 +53,6 @@ export function approvalHistory(limit = 30) {
   return history.slice(-limit);
 }
 
-export function isTrusted(personId) {
-  return trusted.has(personId);
-}
-
-/**
- * Trust a person, or take it back. Trusting also clears whatever they are
- * waiting on right now — the point of the switch is "stop asking me".
- * Returns how many pending cards it swallowed.
- */
-export function setTrusted(personId, on) {
-  if (!personId) return 0;
-  if (!on) {
-    trusted.delete(personId);
-    return 0;
-  }
-  trusted.add(personId);
-  let n = 0;
-  for (const a of [...pending.values()]) {
-    if (a.personId === personId && resolve(a.id, 'allow', 'trust')) n += 1;
-  }
-  return n;
-}
-
 /** Nothing this person asks for from now on waits for a click. */
 export function setLeaving(personId) {
   if (!personId) return 0;
@@ -85,7 +61,6 @@ export function setLeaving(personId) {
 }
 
 export function forget(personId) {
-  trusted.delete(personId);
   leaving.delete(personId);
   resolveAllFor(personId, config.approvalFallbackDecision, 'gone');
 }
@@ -106,19 +81,20 @@ function toPublic(a) {
     tool: a.tool,
     title: a.title,
     detail: a.detail,
+    why: a.why,
+    kind: a.kind,
     createdAt: a.createdAt,
     expiresAt: a.expiresAt,
   };
 }
 
-/** Reading and searching don't need a click; acting on the world does. */
-function isAutoAllowed(tool) {
+/** 앱이 자기 자신에게 거는 도구는 물어볼 것이 없다. */
+function isOurs(tool) {
   if (tool.startsWith('mcp__office__')) return true; // the app's own tools
-  // Watching the browser work is the whole point of the checkbox — asking to
-  // approve every click would make it unwatchable. Turning the checkbox off
-  // detaches the browser entirely, so this only applies where it was asked for.
+  // 브라우저가 일하는 것을 지켜보는 게 목적인 도구다. 클릭마다 물어보면
+  // 볼 수가 없다.
   if (tool.startsWith('mcp__playwright__')) return true;
-  return (config.autoAllowTools ?? []).includes(tool);
+  return false;
 }
 
 /**
@@ -129,15 +105,18 @@ export function requestApproval(personId, payload) {
   const tool = payload.tool_name || 'unknown';
   const input = payload.tool_input ?? {};
 
-  if (isAutoAllowed(tool)) return { held: false, decision: 'allow' };
+  if (isOurs(tool)) return { held: false, decision: 'allow' };
 
   // Already walking to the door — the handover is words, not work.
   if (personId && leaving.has(personId)) return { held: false, decision: 'deny' };
 
-  if (personId && trusted.has(personId)) {
-    logActivity('trust', `자동 승인 · ${describeTool(tool, input)}`, personId, { decision: 'allow' });
-    return { held: false, decision: 'allow' };
-  }
+  // 기본은 허용이다. 물어보는 것은 되돌리기 어렵거나, 자격·개인정보를
+  // 건드리거나, 환경변수를 흘릴 수 있는 일뿐 — 판단은 risk.js 가 한다.
+  const verdict = (config.askAlwaysTools ?? []).includes(tool)
+    ? { risky: true, kind: 'machine', why: '항상 물어보도록 설정된 도구입니다' }
+    : assess(tool, input);
+  if (!verdict.risky) return { held: false, decision: 'allow' };
+
   // Optional: some people would rather nothing ever blocks on a tab being open.
   if (config.holdOnlyWhenViewerConnected && viewerCount === 0) {
     return { held: false, decision: config.approvalFallbackDecision };
@@ -153,6 +132,8 @@ export function requestApproval(personId, payload) {
     input,
     title: describeTool(tool, input),
     detail: detailOf(tool, input),
+    why: verdict.why ?? '',
+    kind: verdict.kind ?? 'machine',
     createdAt,
     expiresAt: config.approvalHoldMs > 0 ? createdAt + config.approvalHoldMs : 0,
     toolUseId: payload.tool_use_id || '',

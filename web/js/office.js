@@ -1072,8 +1072,10 @@ export class Office {
       if (person.state === 'leaving') chips.push('인수인계 중');
       else if (person.approvalCount) chips.push(`승인 ${person.approvalCount}건`);
       else if (s?.currentTool) chips.push(`▶ ${s.currentTool}`);
-      if (person.trusted && person.state !== 'leaving') chips.push('알아서');
       if (person.watch) chips.push('지켜보는 중');
+      // 굳어 있는 것을 자리에서 바로 보이게 — 활동 기록을 펼쳐야만 알 수 있으면
+      // 그건 여전히 "이유 없이 멈춘" 것으로 보인다.
+      if (s?.stalled && person.state === 'working') chips.push('응답 없음');
       if (person.state === 'exited') chips.push('종료됨');
       const chipEl = plate.querySelector('.chips');
       const chipText = chips.join(' · ');

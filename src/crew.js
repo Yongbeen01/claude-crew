@@ -39,6 +39,10 @@ class Person {
     this.persona = null;
     /** set the moment 종료 is confirmed — the office plays the walk out from it */
     this.leavingAt = null;
+    /** 사고로 죽어 다시 앉힌 횟수. 턴 하나를 무사히 마치면 0 으로 돌아간다. */
+    this.reviveCount = 0;
+    /** "응답 없음" 을 이미 적었는가 — 30초마다 같은 말을 반복하지 않으려고. */
+    this.stalledNoted = false;
   }
 
   get state() {
@@ -77,7 +81,6 @@ class Person {
       caption: this.jobName || this.summary || '',
       state: this.state,
       approvalCount: this.approvalCount,
-      trusted: approvals.isTrusted(this.id),
       createdAt: this.createdAt,
       leavingAt: this.leavingAt,
       session: r,
@@ -216,11 +219,22 @@ function wireRunner(person) {
     // The turn is over — the chat clears everything it was showing while the
     // person worked and keeps only the answer.
     bus.emit('turn-end', { personId: person.id, isError: !!ev.is_error, at: Date.now() });
+    // 턴을 무사히 마쳤다 = 진짜로 굴러간다. 되살리기 횟수를 여기서만 되돌린다
+    // — 뜨기만 하면(init) 되돌리면, 매번 뜨자마자 죽는 사람이 영원히 되살아난다.
+    if (!ev.is_error) person.reviveCount = 0;
+    if (person.stalledNoted) person.stalledNoted = false;
     if (ev.is_error && !r.stillborn) {
       logActivity('error', `${person.name} — 턴 실패: ${String(ev.result ?? '').slice(0, 80)}`, person.id);
     }
     // Turn over: nothing can still be blocking on a decision.
     approvals.resolveAllFor(person.id, config.approvalFallbackDecision, 'turn-end');
+    announce();
+  });
+
+  // 지시가 stdin 을 못 넘어갔다. 예전에는 이게 아무 데도 안 남아서, 사람은
+  // 말을 걸었는데 아무 일도 안 일어나는 것만 봤다.
+  r.on('undelivered', ({ text }) => {
+    logActivity('error', `${person.name} — 지시가 전달되지 않았습니다: ${String(text).slice(0, 60)}`, person.id);
     announce();
   });
 
@@ -233,9 +247,88 @@ function wireRunner(person) {
       code === 0 ? `${person.name} 퇴근` : `${person.name} 비정상 종료: ${String(error ?? code).slice(0, 120)}`,
       person.id,
     );
+    // 사고로 죽었으면 같은 대화 그대로 다시 앉힌다. 자리를 비워 두면 사람은
+    // "이유 없이 멈췄다" 로만 본다.
+    if (code !== 0) reseat(person, String(error ?? code));
     announce();
   });
 }
+
+/**
+ * 예기치 않게 죽은 사람을 같은 대화에 다시 앉힌다.
+ *
+ * 무한히 되살리면 안 된다. 자격이 만료됐거나 claude 가 깨졌으면 뜨자마자
+ * 다시 죽으므로, 되살리기가 곧 무한 루프가 된다 — 그 루프는 조용하기까지
+ * 해서 원인을 찾기가 더 나쁘다. 그래서 횟수를 세고, 다 쓰면 멈춘 채로 두고
+ * **왜 멈춰 있는지**를 적는다. 성공한 턴이 하나 지나면 횟수는 되돌아간다.
+ */
+function reseat(person, why) {
+  if (person.leavingAt || !people.has(person.id)) return;
+  const r = person.runner;
+  if (!r || r.stopping) return;
+
+  person.reviveCount = (person.reviveCount ?? 0) + 1;
+  if (person.reviveCount > config.reviveMaxAttempts) {
+    logActivity('error',
+      `${person.name} — ${config.reviveMaxAttempts}번 다시 앉혀도 계속 죽습니다. 그대로 둡니다: ${why.slice(0, 80)}`,
+      person.id);
+    return;
+  }
+
+  const wait = config.reviveBackoffMs * person.reviveCount;
+  logActivity('spawn',
+    `${person.name} — 다시 앉힙니다 (${person.reviveCount}/${config.reviveMaxAttempts})`, person.id);
+  const t = setTimeout(() => {
+    if (person.leavingAt || !people.has(person.id) || person.runner !== r || r.alive) return;
+    try {
+      r.restart();
+      // 붙을 대화가 없어서 죽은 것이면 exit 핸들러가 stillborn 이라 그냥
+      // 지나간다 — 그러면 자리만 비고 아무 말도 안 남는다. revive() 와 같은
+      // 방식으로 여기서 받아 새 대화로 앉힌다.
+      r.once('exit', () => {
+        if (!r.stillborn || !people.has(person.id) || person.runner !== r) return;
+        logActivity('spawn', `${person.name} — 지난 대화를 찾지 못해 새로 시작합니다`, person.id);
+        r.startFresh();
+        announce();
+      });
+    } catch (e) {
+      logActivity('error', `${person.name} — 다시 앉히지 못했습니다: ${String(e.message).slice(0, 80)}`, person.id);
+    }
+    announce();
+  }, wait);
+  t.unref?.();
+}
+
+/**
+ * 굳어 있는 사람을 찾아 **말한다**. 죽이지는 않는다.
+ *
+ * 10분짜리 빌드 하나가 여기 그대로 걸린다. 굳은 것과 오래 걸리는 것을 밖에서
+ * 구별할 방법이 없으니, 끊는 판단은 화면 보는 사람에게 넘기고 우리는 사실만
+ * 올린다 — 조용히 굳어 있는 것보다 굳었다고 적혀 있는 편이 언제나 낫다.
+ * (죽은 프로세스는 여기까지 오지 않는다. 그건 exit 이 잡아 되살린다.)
+ */
+function sweepStalled() {
+  let changed = false;
+  for (const person of people.values()) {
+    const r = person.runner;
+    const stalled = !!r?.alive && r.state === 'working'
+      && Date.now() - r.lastActivityAt > config.stalledAfterMs
+      && person.approvalCount === 0;
+    if (stalled === !!person.stalledNoted) continue;
+    person.stalledNoted = stalled;
+    changed = true;
+    if (stalled) {
+      const mins = Math.round((Date.now() - r.lastActivityAt) / 60000);
+      const tool = r.toJSON().currentTool;
+      logActivity('error',
+        `${person.name} — ${mins}분째 응답이 없습니다${tool ? ` (${tool} 실행 중)` : ''}`, person.id);
+    }
+  }
+  if (changed) announce();
+}
+
+const stallTimer = setInterval(sweepStalled, 30_000);
+stallTimer.unref?.();
 
 /**
  * 한 사람의 세션을 세운다. 새로 뽑을 때와 되살릴 때가 **같은 코드**를 지난다 —

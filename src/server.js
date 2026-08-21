@@ -342,13 +342,6 @@ export function createServer() {
         const body = await readBody(req);
         return json(res, 200, { ok: crew.assignJob(id, String(body.jobName ?? '').trim()) });
       }
-      // "이 사람은 그냥 알아서 하게 두기" — stop asking for every tool.
-      if (sub === 'trust' && req.method === 'POST') {
-        const body = await readBody(req);
-        const swallowed = approvals.setTrusted(id, body.on === true);
-        crew.touch(id);
-        return json(res, 200, { ok: true, on: approvals.isTrusted(id), resolved: swallowed });
-      }
     }
 
     // ---- this computer's own windows ---------------------------------------

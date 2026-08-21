@@ -132,6 +132,11 @@ export class Runner extends EventEmitter {
     return !!this.child && this.child.exitCode === null && !this.child.killed;
   }
 
+  /** 우리가 내보내는 중인가. 그 종료는 사고가 아니라 결정이다. */
+  get stopping() {
+    return this._stopping || this._restarting;
+  }
+
   /**
    * 이어 붙이기가 **방금** 실패했다.
    *
@@ -464,6 +469,11 @@ export class Runner extends EventEmitter {
     appendJsonl(this.transcriptFile, line.length > 8000 ? { ...row, input: null, big: true } : row);
   }
 
+  /**
+   * stdin 은 조용히 실패한다. 프로세스가 방금 죽었으면 write 가 EPIPE 를
+   * 던지고, 그 예외를 삼키면 지시는 사라졌는데 아무도 그 사실을 모른다.
+   * 여기서 거짓을 돌려주는 것이 send() 가 상태를 되돌릴 유일한 근거다.
+   */
   _write(text) {
     if (!this.alive) return false;
     const msg = {
@@ -472,8 +482,13 @@ export class Runner extends EventEmitter {
       parent_tool_use_id: null,
       session_id: this.sessionId,
     };
-    this.child.stdin.write(`${JSON.stringify(msg)}\n`);
-    return true;
+    try {
+      this.child.stdin.write(`${JSON.stringify(msg)}\n`);
+      return true;
+    } catch (e) {
+      this.stderr = `${this.stderr}\n지시를 전달하지 못했습니다: ${e.message}`.slice(-8000);
+      return false;
+    }
   }
 
   /**
@@ -493,7 +508,20 @@ export class Runner extends EventEmitter {
     this._setPhase('thinking');
     if (!hidden) this._push({ role: 'user', kind: 'text', text: body });
     this.emit('change');
-    return this._write(body);
+
+    if (this._write(body)) return true;
+
+    /**
+     * 전달이 실패했는데 상태만 '일하는 중' 으로 남겨 두면, 그 사람은 아무
+     * 말도 없이 영영 일하는 척을 한다 — "아무 이유 없이 세션이 멈췄다" 로
+     * 보이던 것의 절반이 이거였다. 지시가 못 갔으면 갔던 표시도 물린다.
+     */
+    this.turns -= 1;
+    this.state = this.alive ? 'idle' : 'exited';
+    this._setPhase(null);
+    this.emit('undelivered', { text: body, hidden });
+    this.emit('change');
+    return false;
   }
 
   /**
@@ -536,6 +564,10 @@ export class Runner extends EventEmitter {
       plugins: this.init?.plugins ?? [],
       mcpServers: this.init?.mcp_servers ?? [],
       workdir: this.workdir,
+      // 일한다면서 오래 아무 말이 없다. 죽이지 않고 사실만 적는다 — 오래
+      // 걸리는 빌드 하나가 여기 걸릴 수 있어서, 판단은 화면 보는 사람 몫이다.
+      stalledMs: this.state === 'working' ? Date.now() - this.lastActivityAt : 0,
+      stalled: this.state === 'working' && Date.now() - this.lastActivityAt > config.stalledAfterMs,
       error: this.state === 'exited' ? this.stderr.slice(-300) || null : null,
     };
   }

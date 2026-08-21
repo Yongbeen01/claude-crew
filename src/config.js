@@ -64,24 +64,42 @@ const DEFAULTS = {
   idleAfterMs: 5 * 60 * 1000,
 
   /**
-   * How long a tool call is held waiting for a click. 0 = until decided.
-   * Unlike claude-office — which was holding up the user's own IDE — holding
-   * here only parks a background worker, so waiting is the sane default.
+   * 승인 카드 하나가 도구 호출을 붙잡아 두는 시간.
+   *
+   * 예전 기본값은 0 — **영원히** 였다. 붙잡아 두는 게 백그라운드 일꾼 하나뿐
+   * 이라 손해가 없다고 봤는데, 그건 카드가 반드시 사람 눈에 닿는다는 가정
+   * 위에서만 맞다. 탭을 닫아 뒀거나, 스트림이 끊겨 카드가 못 그려졌거나,
+   * 그냥 자리를 비웠으면 그 사람은 "도구 실행 중" 인 채로 영영 굳는다.
+   * 실제로 가장 잦은 멈춤이 이거였다.
+   *
+   * 그래서 유한하게 둔다. 시간이 다하면 approvalFallbackDecision 으로
+   * 풀린다 — 'ask' 는 그 도구를 실행하지 않고 사람에게 말하라는 뜻이라,
+   * 세션은 굳는 대신 말을 하고 멈춘다. 굳는 것과 말하고 멈추는 것은 다르다.
    */
-  approvalHoldMs: 0,
+  approvalHoldMs: 10 * 60 * 1000,
   approvalFallbackDecision: 'ask',
   holdOnlyWhenViewerConnected: false,
 
   /**
-   * Tools that never need a click. Reading and searching are reversible and
-   * asking about each one would make the office unusable; anything that writes,
-   * runs, or sends is left to the user.
+   * 무조건 물어볼 도구 이름. 비워 두는 것이 기본 —— 무엇을 물어볼지는
+   * 목록이 아니라 src/risk.js 가 그때그때 판단한다 (되돌리기 어려운 변경 ·
+   * 자격/개인정보 · 환경변수 노출). 목록으로 관리하고 싶은 사람만 쓴다.
    */
-  autoAllowTools: [
-    'Read', 'Glob', 'Grep', 'NotebookRead',
-    'Skill', 'ToolSearch', 'TodoWrite',
-    'WebSearch', 'WebFetch',
-  ],
+  askAlwaysTools: [],
+
+  /**
+   * 일하는 사람이 이만큼 아무 말이 없으면 화면에 "응답 없음" 이라고 적는다.
+   * 죽이지는 않는다 — 오래 걸리는 빌드 하나가 여기 걸릴 수 있어서, 판단은
+   * 사람 몫으로 둔다. 조용히 굳어 있는 것보다 굳었다고 말하는 게 낫다.
+   */
+  stalledAfterMs: 10 * 60 * 1000,
+
+  /**
+   * 예기치 않게 죽은 사람을 몇 번까지 다시 앉힐 것인가. 자격이 만료된 상태
+   * 같으면 뜨자마자 계속 죽으므로, 무한히 되살리면 그게 곧 무한 루프다.
+   */
+  reviveMaxAttempts: 3,
+  reviveBackoffMs: 5000,
 
   openBrowserOnStart: true,
 
