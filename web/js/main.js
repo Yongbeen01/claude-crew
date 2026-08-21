@@ -1514,10 +1514,17 @@ el.authBtn.addEventListener('click', async () => {
       if (!r.ok) alert(r.error ?? '로그아웃하지 못했습니다.');
       if (r.auth) { store.tools = { ...store.tools, auth: r.auth }; renderAuth(); }
     } else {
-      await api('/api/auth', { method: 'POST', body: { action: 'login' } });
+      const r = await api('/api/auth', { method: 'POST', body: { action: 'login' } });
+      // 창이 뜨지도 못했으면 기다릴 것이 없다. 예전에는 이 경우에도 3분을
+      // 말없이 기다렸고, 사람은 창이 깜빡였다는 것 말고는 아무것도 못 봤다.
+      if (!r.ok) { alert(r.error ?? '로그인 창을 열지 못했습니다.'); return; }
       el.authBtn.textContent = '로그인 중…';
+      // 그 창은 claude 가 하는 말을 그대로 보여 준다 — 영어다. 무엇을 해야
+      // 하는지는 여기서 한국어로 말해 준다.
+      alert('새로 열린 검은 창에서 로그인을 마쳐 주세요.\n브라우저가 열리면 계정을 고르고, 끝나면 그 창은 닫으셔도 됩니다.');
       // 로그인은 딴 창에서 사람이 끝낸다. 끝났는지는 물어봐야 안다.
-      await pollAuth();
+      const done = await pollAuth();
+      if (!done) alert('아직 로그인이 확인되지 않았습니다.\n그 창에 적힌 내용을 확인하고 다시 눌러 주세요.');
     }
   } finally {
     el.authBtn.disabled = false;

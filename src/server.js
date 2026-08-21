@@ -454,9 +454,12 @@ export function createServer() {
         if (body.action === 'login') {
           // 브라우저를 띄우고 사람이 끝낼 때까지 기다리는 일이라, 여기서
           // 기다리지 않는다. 화면이 주기적으로 상태를 다시 물어본다.
-          authLogin();
-          logActivity('auth', '클로드 로그인 창을 열었습니다');
-          return json(res, 200, { ok: true, started: true });
+          // 다만 **창이 뜨기는 했는지**는 지금 알 수 있고, 그건 사실대로 말한다 —
+          // 예전에는 창이 떴다 닫혀도 화면은 늘 "열었습니다" 라고만 했다.
+          const r = authLogin();
+          logActivity(r.ok ? 'auth' : 'error',
+            r.ok ? '클로드 로그인 창을 열었습니다' : `로그인 창을 열지 못했습니다 — ${r.error}`);
+          return json(res, r.ok ? 200 : 400, r);
         }
         if (body.action === 'logout') {
           const r = await authLogout();

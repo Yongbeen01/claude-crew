@@ -119,6 +119,28 @@ export function claudeArgv(args) {
 }
 
 /**
+ * 우리가 `claude` 를 부를 때 물려주는 환경.
+ *
+ * 일하는 사람들(runner)은 과금 경로로 새지 않도록 이 값들을 지운 채로 뜬다.
+ * 그런데 계정 확인·로그인은 지우지 않은 채로 부르고 있었다 — 그러면 둘이
+ * **서로 다른 자격을 보고** 서로 다른 답을 한다:
+ *
+ *   · 화면의 계정 버튼: 환경변수 API 키를 보고 "로그인됨"
+ *   · 실제 세션: 그 키가 지워진 채라 "failed to authenticate"
+ *
+ * 로그인은 됐다는데 아무도 일을 못 하는 그 상태가 여기서 나온다. 물어보는
+ * 쪽과 일하는 쪽이 같은 것을 보게 맞춘다.
+ */
+export function cliEnv() {
+  const env = { ...process.env };
+  delete env.ANTHROPIC_API_KEY;
+  delete env.ANTHROPIC_AUTH_TOKEN;
+  delete env.CLAUDE_CODE_OAUTH_TOKEN;
+  delete env.CLAUDE_CONFIG_DIR;
+  return env;
+}
+
+/**
  * 지금 누구로 로그인돼 있는가.
  *
  * `claude auth status` 는 JSON 을 준다. 문장에서 낱말을 찾으면 안 된다 —
@@ -144,7 +166,7 @@ export function refreshAuth() {
   authInFlight = new Promise((resolve) => {
     const a = claudeArgv(['auth', 'status']);
     execFile(a.cmd, a.args, {
-      windowsHide: true, timeout: 20_000, env: process.env,
+      windowsHide: true, timeout: 20_000, env: cliEnv(),
     }, (err, stdout) => {
       authInFlight = null;
       let next = { loggedIn: false, email: '', plan: '', method: '', checkedAt: Date.now() };
@@ -175,26 +197,100 @@ export function refreshAuth() {
  * 로그인은 브라우저를 띄우고 사람이 끝낼 때까지 기다리는 일이라, 창 없이
  * 돌리면 아무 일도 안 일어난 것처럼 보인다. **보이는 창**으로 띄워서 사람이
  * 무슨 일이 벌어지는지 보고 끝낼 수 있게 한다.
+ *
+ * 그 창을 띄우는 법이 문제였다. 예전에는 명령을 통째로 인자에 담아
+ * `cmd /c start "" /wait cmd /c "…claude… auth login & pause"` 로 넘겼는데,
+ * Node 는 인자 안의 따옴표를 `\"` 로 바꿔 내보내고 cmd.exe 는 백슬래시를
+ * 탈출문자로 **안** 친다. 그래서 cmd 가 보는 명령줄은 따옴표 짝이 어긋난
+ * 다른 문장이 되고, start 는 없는 프로그램을 부르다 만다 — 창이 떴다가
+ * 그대로 닫히고, 로그인은 시작조차 안 된다. `pause` 도 그 문장 안에 있으니
+ * 같이 날아가서, 무엇이 잘못됐는지 볼 새도 없다.
+ *
+ * 그래서 명령을 인자에 담지 않는다. 할 일을 작은 .cmd 파일에 적어 두고
+ * 그 **파일 하나만** 부른다. 인용이 한 겹으로 줄어드니 어긋날 짝이 없다.
  */
+const LOGIN_SCRIPT = path.join(DATA_DIR, 'auth-login.cmd');
+
+/**
+ * 로그인 창이 할 일. 파일 안은 **글자 그대로 ASCII 만** 쓴다.
+ *
+ * 배치 파일은 콘솔 코드페이지로 읽힌다. claude 가 놓인 경로를 여기 적어 두면
+ * 사용자 이름이 한글인 사람(`C:\Users\홍길동\…`)에게서 그 줄이 깨져 읽히고,
+ * 창은 "파일을 찾을 수 없습니다" 만 남기고 만다. 그래서 경로는 파일이 아니라
+ * **환경변수로** 넘긴다 — 환경변수는 코드페이지를 거치지 않는다.
+ *
+ * 창에 뜨는 안내가 영어인 것도 같은 이유다. 한국어 Windows 의 기본 콘솔
+ * 글꼴은 UTF-8 한글을 네모로 그린다. 한국어 안내는 글자가 제대로 나오는 앱
+ * 화면이 맡고, 이 창은 claude 가 하는 말만 있는 그대로 보여 준다.
+ */
+function writeLoginScript() {
+  const lines = [
+    '@echo off',
+    'chcp 65001 >nul',                       // claude 가 그리는 상자 문자가 깨지지 않게
+    'title Claude Code - sign in',
+    'echo.',
+    'echo   Signing in to Claude Code.',
+    'echo   Finish in the browser, then come back here.',
+    'echo.',
+    // `call` 이 꼭 필요하다. npm 으로 깐 claude 는 `.cmd` 껍데기인데, 배치
+    // 파일에서 다른 배치 파일을 call 없이 부르면 **제어가 돌아오지 않는다**.
+    // 그러면 아래 pause 까지 못 오고 창이 그대로 닫힌다 — 고치려던 그 증상이
+    // 그대로 다시 난다.
+    'call "%CREW_CLAUDE_BIN%" auth login',
+    'set CREW_RC=%ERRORLEVEL%',
+    'echo.',
+    'if "%CREW_RC%"=="0" echo   Done. You can close this window.',
+    'if not "%CREW_RC%"=="0" echo   Sign-in did not finish. Exit code %CREW_RC%.',
+    'echo.',
+    'pause',
+    '',
+  ];
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.writeFileSync(LOGIN_SCRIPT, lines.join('\r\n'), 'ascii');
+}
+
 export function authLogin() {
   const bin = claudeBin();
-  if (process.platform !== 'win32') {
-    spawn(bin, ['auth', 'login'], { detached: true, stdio: 'ignore' }).unref();
-    return true;
+  // 못 찾았으면 창을 띄워 봐야 같은 PATH 로 또 못 찾는다. 빈 창을 던져 주고
+  // 사람이 무엇이 잘못됐는지 짐작하게 두느니, 화면에 사실대로 적는다.
+  if (bin === 'claude') {
+    return { ok: false, error: 'claude 를 찾지 못했습니다. Claude Code 를 설치한 뒤 다시 시도해 주세요.' };
   }
-  // cmd 창 하나를 띄워 그 안에서 돌린다. 로그인 절차가 그 창에 나온다.
-  const child = spawn('cmd.exe', ['/c', 'start', '""', '/wait', 'cmd', '/c', `"${bin}" auth login & pause`], {
-    stdio: 'ignore', windowsHide: false, shell: false,
+
+  if (process.platform !== 'win32') {
+    spawn(bin, ['auth', 'login'], { detached: true, stdio: 'ignore', env: cliEnv() }).unref();
+    return { ok: true, started: true };
+  }
+
+  try {
+    writeLoginScript();
+  } catch (e) {
+    return { ok: false, error: `로그인 창을 준비하지 못했습니다 — ${String(e.message).slice(0, 120)}` };
+  }
+
+  // windowsVerbatimArguments: 명령줄을 우리가 적은 그대로 내보낸다. Node 가
+  // 따옴표를 손대는 순간 위에 적은 그 고장이 다시 난다.
+  const child = spawn('cmd.exe', ['/c', 'start', '""', '/wait', `"${LOGIN_SCRIPT}"`], {
+    stdio: 'ignore',
+    windowsHide: false,
+    shell: false,
+    windowsVerbatimArguments: true,
+    // 자격은 세션과 똑같은 자리에서 찾게 한다 — 여기서 환경변수 키를 남겨 두면
+    // 로그인 창은 성공했다는데 정작 일하는 사람들은 못 붙는 상태가 만들어진다.
+    env: { ...cliEnv(), CREW_CLAUDE_BIN: bin },
   });
+  // 창이 닫혔다 = 사람이 끝냈다. 화면이 물어보기를 기다리지 말고 바로 확인한다.
+  child.on('close', () => { refreshAuth(); });
+  child.on('error', () => { /* 아래 폴링이 어차피 사실을 말한다 */ });
   child.unref();
-  return true;
+  return { ok: true, started: true };
 }
 
 export function authLogout() {
   return new Promise((resolve) => {
     const a = claudeArgv(['auth', 'logout']);
     execFile(a.cmd, a.args, {
-      windowsHide: true, timeout: 30_000, env: process.env,
+      windowsHide: true, timeout: 30_000, env: cliEnv(),
     }, async (err) => {
       // 결과를 짐작하지 않고 다시 물어본다 — 화면에 뜨는 건 이 값이다.
       const now = await refreshAuth();

@@ -6,7 +6,7 @@ import path from 'node:path';
 import { config, SESSIONS_DIR } from './config.js';
 import { appendJsonl, readJsonl } from './store.js';
 import { equipTools, linkInto } from './toolbox.js';
-import { claudeBin } from './tools.js';
+import { claudeBin, cliEnv } from './tools.js';
 
 const isWin = process.platform === 'win32';
 
@@ -60,11 +60,7 @@ function killTree(child) {
  * subscription login — strip them all and let it use the login only.
  */
 export function childEnv() {
-  const env = { ...process.env };
-  delete env.ANTHROPIC_API_KEY;
-  delete env.ANTHROPIC_AUTH_TOKEN;
-  delete env.CLAUDE_CODE_OAUTH_TOKEN;
-  delete env.CLAUDE_CONFIG_DIR;
+  const env = cliEnv();
   // 받아쓰기 스크립트가 어떤 모델을 쓸지. 사람이 고르는 게 아니라 설정에서 온다.
   env.CREW_STT_MODEL = config.sttModel;
   return env;
