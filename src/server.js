@@ -11,7 +11,7 @@ import * as timers from './timers.js';
 import { handle as handleMcp, personIdForToken } from './mcpServer.js';
 import * as approvals from './approvals.js';
 import * as savedGroups from './savedGroups.js';
-import { updateStatus, checkForUpdate, applyAndRestart } from './update.js';
+import { updateStatus, checkForUpdate, applyAndRestart, restartOnly, bootId } from './update.js';
 import { toolboxStatus } from './toolbox.js';
 import { toolsStatus, authLogin, authLogout, refreshAuth } from './tools.js';
 import { desktopState, focusPerson, refreshDesktop } from './desktop.js';
@@ -483,6 +483,13 @@ export function createServer() {
       return json(res, 200, updateStatus());
     }
 
+    // 받아 둔 것을 켜기만 한다. git 은 건드리지 않는다 — 파일은 이미 새것이고
+    // 남은 것은 켜는 일뿐이라, 여기서 받기를 또 시키면 될 리 없는 것을 시키는 셈.
+    if (p === '/api/restart' && req.method === 'POST') {
+      const r = restartOnly();
+      return json(res, r.ok ? 200 : 400, r);
+    }
+
     // ---- personas ----------------------------------------------------------
     if (p === '/api/personas') return json(res, 200, { personas: listPersonas().map(publicPersona) });
 
@@ -526,7 +533,12 @@ export function createServer() {
       }
     }
 
-    if (p === '/healthz') return json(res, 200, { ok: true, viewers: viewers.size, version: readVersion() });
+    // bootId 가 여기 있는 이유: 받기를 누른 화면이 "정말 새로 떴는지" 를 알
+    // 방법이 이것뿐이다. version 은 커밋마다 바뀌지 않아서, 다시 켜기가 실패해
+    // 살아남은 옛 프로세스와 새 프로세스가 똑같은 값을 댄다.
+    if (p === '/healthz') {
+      return json(res, 200, { ok: true, viewers: viewers.size, version: readVersion(), bootId: bootId() });
+    }
 
     if (req.method === 'GET') return serveStatic(res, p);
     return json(res, 404, { error: 'not found' });

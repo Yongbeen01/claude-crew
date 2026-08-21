@@ -1,4 +1,5 @@
-import { execFile, spawn } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { ROOT, config } from './config.js';
@@ -18,6 +19,53 @@ const REPO = process.env.CREW_REPO_SLUG || 'Yongbeen01/claude-crew';
 const BRANCH = process.env.CREW_BRANCH || 'main';
 
 let status = { current: null, latest: null, behind: false, checkedAt: 0, error: '' };
+
+/**
+ * 지금 돌고 있는 이 프로세스가 누구인가.
+ *
+ * 두 가지 거짓말을 막으려고 있다.
+ *
+ * 1. **"다시 켜졌다"는 거짓말.** 받기를 누른 화면은 서버가 돌아오길 기다렸다가
+ *    새로고침하는데, 기다리는 방법이 `/healthz` 가 답하는지였다. 그런데 다시
+ *    켜기가 실패해서 **옛 프로세스가 안 죽고 그대로 있으면** 그게 곧장
+ *    답해 버린다 — 화면은 새로 떴다고 믿고 새로고침하고, 사람 눈에는 옛 화면이
+ *    그대로다. "받기를 눌러도 아무 변화가 없다" 의 정체가 이거다.
+ *    버전으로도 구별이 안 됐다. package.json 의 version 은 커밋마다 바뀌지
+ *    않아서, 옛 프로세스와 새 프로세스가 똑같은 값을 댄다.
+ *
+ * 2. **"최신이다"는 거짓말.** 파일은 받아졌는데 다시 켜지지 못하면, 다음
+ *    확인부터 HEAD 와 origin 이 같아져서 `behind` 가 false 가 된다. 띠는
+ *    사라지고, 돌고 있는 건 계속 옛 코드다. 아무 데도 안 적히는 상태가 된다.
+ *
+ * 그래서 뜰 때의 커밋을 붙잡아 둔다. 디스크의 HEAD 가 그보다 앞서 있으면
+ * 그건 "받아는 뒀는데 아직 안 켜졌다" 는 뜻이고, 화면이 그렇게 말할 수 있다.
+ */
+const BOOT_ID = randomUUID().slice(0, 8);
+const BOOT_COMMIT = readHead();
+
+function readHead() {
+  try {
+    return String(execFileSync(gitBin(), ['rev-parse', 'HEAD'], {
+      cwd: ROOT, windowsHide: true, timeout: 10_000, encoding: 'utf8',
+    })).trim();
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * HEAD 는 자주 안 바뀌는데 updateStatus() 는 자주 불린다 (/api/state 마다).
+ * 매번 git 을 동기로 부르면 그때마다 서버가 멈춘다 — 계정 확인이 같은 이유로
+ * 캐시를 쓴다. 파일이 받아진 직후에는 곧 알아채야 하니 짧게만 잡는다.
+ */
+let headCache = { value: '', at: 0 };
+function headCommit(maxAgeMs = 10_000) {
+  if (Date.now() - headCache.at < maxAgeMs) return headCache.value;
+  headCache = { value: readHead(), at: Date.now() };
+  return headCache.value;
+}
+
+export const bootId = () => BOOT_ID;
 
 /**
  * 사무실 쪽으로 나 있는 창구.
@@ -54,6 +102,10 @@ function run(cmd, args, opts = {}) {
 const isGitCheckout = () => fs.existsSync(path.join(ROOT, '.git'));
 
 export function updateStatus() {
+  // 받아 둔 파일과 지금 돌고 있는 코드가 다른가. 다르면 "최신" 이라고 말하면
+  // 안 된다 — 최신인 것은 폴더고, 사람이 쓰고 있는 것은 아직 옛것이다.
+  const head = isGitCheckout() ? headCommit() : '';
+  const stale = !!BOOT_COMMIT && !!head && head !== BOOT_COMMIT;
   return {
     ...status,
     current: version(),
@@ -62,6 +114,11 @@ export function updateStatus() {
     git: isGitCheckout(),
     // 화면이 띠 문구를 고르는 데 쓴다 — 알아서 받는 중인지, 눌러야 하는지.
     auto: config.autoUpdate !== false && canRestart(),
+    bootId: BOOT_ID,
+    /** 받아는 뒀는데 아직 그 코드로 돌고 있지 않다. */
+    stale,
+    stalePending: stale ? head.slice(0, 7) : '',
+    canRestart: canRestart(),
   };
 }
 
@@ -106,8 +163,26 @@ export async function checkForUpdate() {
  * 그래도 **일하는 사람이 있으면 손대지 않는다.** 대화는 돌아와도 지금 돌고
  * 있는 그 턴은 못 살리기 때문이다 — 다음 차례(30분 뒤)에 다시 본다.
  */
+/** 이미 받아 둔 것을 켜려고 몇 번이나 시도했는가. 안 되는 컴퓨터에서 30분마다
+ *  영원히 다시 켜기를 시도하지 않도록. 그 뒤로는 화면이 사람에게 말한다. */
+let staleRestarts = 0;
+
 async function maybeAutoUpdate() {
-  if (config.autoUpdate === false || !status.behind) return;
+  if (config.autoUpdate === false) return;
+
+  // 받아만 놓고 못 켠 상태. 파일은 이미 새것이니 받을 것은 없고, 켜기만 하면
+  // 된다. 여기서 손대지 않으면 behind 가 false 라 띠도 안 뜨고, 그 컴퓨터는
+  // 아무 말 없이 옛 코드로 계속 돈다.
+  if (updateStatus().stale) {
+    if (!canRestart() || office.busy() > 0 || staleRestarts >= 2) return;
+    staleRestarts += 1;
+    logActivity('update', '받아 둔 새 버전으로 다시 켭니다');
+    office.shutdown();
+    restartApp({ delayMs: 2200 });
+    return;
+  }
+
+  if (!status.behind) return;
   // 받아만 놓고 스스로 못 켜면 돌고 있는 건 여전히 옛 코드다. 그건 조용히
   // 할 일이 아니라 사람에게 말할 일이라, 띠를 띄운 채로 둔다.
   if (!canRestart()) return;
@@ -119,6 +194,21 @@ async function maybeAutoUpdate() {
     lastAutoError = result.error;
     logActivity('error', `새 버전을 못 받았습니다 — ${result.error}`);
   }
+}
+
+/**
+ * 이미 받아 둔 것을 적용하려고 다시 켜기만 한다. 받기와 달리 git 을 건드리지
+ * 않는다 — 파일은 이미 새것이고, 남은 것은 켜는 일뿐이다.
+ */
+export function restartOnly() {
+  if (!canRestart()) {
+    return { ok: false, error: '스스로 다시 켤 수 없는 설치본입니다. 바탕화면 아이콘으로 닫았다 열어 주세요.' };
+  }
+  logActivity('update', '다시 켭니다');
+  // 세어 두고 나서 정리한다 — 정리한 뒤에 세면 언제나 0 이다.
+  const seated = office.seated();
+  office.shutdown();
+  return { ok: true, restarting: restartApp({ delayMs: 2200 }), revived: seated };
 }
 
 /**

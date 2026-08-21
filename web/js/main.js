@@ -97,6 +97,7 @@ const el = {
   updateBar: document.getElementById('update-bar'),
   updateText: document.getElementById('update-text'),
   updateApply: document.getElementById('update-apply'),
+  updateRestart: document.getElementById('update-restart'),
   updateHide: document.getElementById('update-hide'),
   dragLayer: document.getElementById('drag-layer'),
   windowsPanel: document.getElementById('windows-panel'),
@@ -2026,6 +2027,7 @@ function renderUpdate() {
   }
   el.updateApply.hidden = false;
   el.updateHide.hidden = false;
+  el.updateRestart.hidden = true;
 
   // git 이 없으면 자동 갱신 자체가 불가능하다. 조용히 아무 일도 안 하는 대신
   // 그렇다고 말한다 — 예전에는 이 경우 띠가 영영 안 떠서, 새 버전을 내도
@@ -2037,6 +2039,28 @@ function renderUpdate() {
       + '새 버전을 받으려면 설치 한 줄을 다시 실행해 주세요.';
     return;
   }
+
+  /**
+   * 받아는 뒀는데 아직 그 코드로 돌고 있지 않다.
+   *
+   * 이 상태가 예전에는 **아무 데도 안 적혔다.** 파일이 받아지면 behind 가
+   * false 가 되어 띠가 사라지고, 돌고 있는 것은 계속 옛 코드다. 쓰는 사람 눈에는
+   * "받기를 눌렀는데 아무 변화가 없다" 이고, 화면은 최신이라고 말한다.
+   * 그래서 최신 여부보다 이걸 먼저 본다.
+   */
+  if (u?.stale) {
+    el.updateBar.hidden = false;
+    el.updateApply.hidden = true;
+    el.updateHide.hidden = false;
+    el.updateRestart.hidden = !u.canRestart;
+    el.updateText.textContent = u.canRestart
+      ? '새 버전을 이미 받아 뒀는데 아직 옛 코드로 돌고 있습니다. 다시 켜면 적용됩니다 — '
+        + '앉아 있는 사람들은 나눈 대화 그대로 자리로 돌아옵니다.'
+      : '새 버전을 이미 받아 뒀는데 아직 옛 코드로 돌고 있습니다. '
+        + '앱을 완전히 닫았다가 바탕화면 아이콘으로 다시 열어 주세요.';
+    return;
+  }
+  el.updateRestart.hidden = true;
 
   el.updateBar.hidden = !u?.behind || updateDismissed;
   if (el.updateBar.hidden) return;
@@ -2071,6 +2095,9 @@ el.updateApply.addEventListener('click', async () => {
   }
   el.updateApply.disabled = true;
   el.updateText.textContent = '받는 중…';
+  // 누구에게 말하고 있었는지 먼저 적어 둔다 — 나중에 "정말 다른 프로세스가
+  // 떴는가" 를 이 값과 비교해서 판단한다.
+  const was = await bootIdNow();
   const r = await api('/api/update', { method: 'POST' });
   if (!r.ok) {
     el.updateApply.disabled = false;
@@ -2086,24 +2113,64 @@ el.updateApply.addEventListener('click', async () => {
   // 하고 끝냈는데, 그 말을 따르지 않으면 화면은 그대로라 받은 사람 눈에는
   // 업데이트가 안 된 것으로 보였다. 서버가 돌아오면 우리가 새로고침한다.
   el.updateText.textContent = '다시 시작하는 중… 잠시만요.';
-  await waitForServer();
-  location.reload();
+  if (await waitForNewServer(was)) location.reload();
 });
 
-/** 서버가 다시 뜰 때까지. 못 뜨면 사람이 아이콘으로 켤 수 있게 말해 준다. */
-async function waitForServer(timeoutMs = 60_000) {
+/** 이미 받아 둔 것을 켜기만 한다. */
+el.updateRestart.addEventListener('click', async () => {
+  const busy = store.crew.filter((p) => p.state === 'working' || p.state === 'starting');
+  if (busy.length && !confirm(
+    `지금 ${busy.length}명이 일하는 중입니다.\n\n다시 켜면 나눈 대화 그대로 자리로 돌아와 하던 일을 이어서 합니다.\n`
+    + '다만 지금 돌고 있는 것은 중간에 한 번 끊깁니다. 지금 켤까요?',
+  )) return;
+
+  el.updateRestart.disabled = true;
+  const was = await bootIdNow();
+  const r = await api('/api/restart', { method: 'POST' });
+  if (!r.ok) {
+    el.updateRestart.disabled = false;
+    el.updateText.textContent = r.error ?? '다시 켜지 못했습니다.';
+    return;
+  }
+  el.updateText.textContent = '다시 시작하는 중… 잠시만요.';
+  if (await waitForNewServer(was)) location.reload();
+});
+
+/** 지금 답하는 서버가 누구인가. 프로세스마다 다른 값이다. */
+async function bootIdNow() {
+  try {
+    return (await (await fetch('/healthz', { cache: 'no-store' })).json()).bootId ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * **다른** 프로세스가 뜰 때까지 기다린다.
+ *
+ * 예전에는 `/healthz` 가 답하기만 하면 새로 떴다고 봤다. 그런데 다시 켜기가
+ * 실패해서 옛 프로세스가 안 죽고 그대로 있으면 그게 곧장 답한다 — 화면은
+ * 새로고침하고, 사람 눈에는 아무것도 안 바뀐 옛 화면이 그대로다. 그게 바로
+ * "받기를 눌러도 아무 변화가 없다" 였다. 버전으로는 구별이 안 된다:
+ * package.json 의 version 은 커밋마다 바뀌지 않는다.
+ *
+ * 그래서 뜰 때마다 달라지는 값(bootId)이 **바뀌었는지**를 본다. 안 바뀌면
+ * 새로고침하지 않고, 무엇이 잘못됐는지 그대로 말한다.
+ */
+async function waitForNewServer(was, timeoutMs = 60_000) {
   const until = Date.now() + timeoutMs;
-  // 먼저 죽는 것을 기다린다 — 아직 살아 있는 옛 프로세스를 보고 곧장
-  // 새로고침하면 옛 코드를 다시 받는다.
   await new Promise((r) => { setTimeout(r, 2500); });
   while (Date.now() < until) {
-    try {
-      const res = await fetch('/healthz', { cache: 'no-store' });
-      if (res.ok) return true;
-    } catch { /* 아직 안 떴다 */ }
+    const now = await bootIdNow();
+    // was 를 못 읽었으면 비교할 것이 없다 — 살아 있기만 하면 받아들인다.
+    if (now && (!was || now !== was)) return true;
     await new Promise((r) => { setTimeout(r, 1000); });
   }
-  el.updateText.textContent = '다시 시작하지 못했습니다. 바탕화면 아이콘으로 열어 주세요.';
+  el.updateText.textContent = '받기는 됐는데 앱이 스스로 다시 켜지지 못했습니다. '
+    + '앱을 완전히 닫았다가 바탕화면 아이콘으로 다시 열어 주세요.';
+  el.updateApply.hidden = true;
+  el.updateRestart.hidden = false;
+  el.updateRestart.disabled = false;
   return false;
 }
 
