@@ -87,6 +87,17 @@ export function loadPersona(key) {
     permissionMode: meta.permissionMode ?? 'default',
     /** this type cannot do its job without the visible browser (영화감독) */
     watch: meta.watch === true,
+    /**
+     * 이 유형이 하는 말은 화면을 안 보고 있어도 닿아야 한다 (토끼).
+     *
+     * 기본값은 유형 파일이 아니라 config 에서 온다. 유형 폴더는 처음 켤 때
+     * 사용자 폴더로 복사되고 그 뒤로는 업데이트가 덮지 않아서, 유형 파일에만
+     * 적으면 이미 쓰고 있는 사람에게는 영영 안 켜진다. 유형 파일에 적힌 값이
+     * 있으면 그게 이긴다 — 끄는 것은 언제나 사용자 몫이어야 한다.
+     */
+    notifyOnSpeak: typeof meta.notifyOnSpeak === 'boolean'
+      ? meta.notifyOnSpeak
+      : (config.notifyOnSpeakPersonas ?? []).includes(key),
     /** toolbox groups this type needs — fetched the first time one is hired */
     toolbox: Array.isArray(meta.toolbox) ? meta.toolbox : [],
     tools: meta.tools ?? null,

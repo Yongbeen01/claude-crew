@@ -3,6 +3,7 @@ import { baseUrl } from './config.js';
 import { bus, logActivity } from './bus.js';
 import * as jobs from './jobs.js';
 import * as timers from './timers.js';
+import { notifyFor } from './toast.js';
 
 /**
  * The office's own MCP server — how a session hands structured data back.
@@ -163,10 +164,16 @@ const TOOLS = [
   },
   {
     name: 'notify',
-    description: 'Send the user a desktop notification. For things they need to see when they are not looking at the office.',
+    description: 'Raise a Windows desktop notification. This reaches the user even when the office is closed and nobody is looking at the screen — it is the only thing that does. Use it whenever what you have to say cannot wait for the user to come back and read the chat.',
     inputSchema: {
       type: 'object',
-      properties: { text: { type: 'string' } },
+      properties: {
+        text: { type: 'string' },
+        urgent: {
+          type: 'boolean',
+          description: 'true 면 사용자가 직접 치울 때까지 화면에 남고 알람 소리가 반복됩니다. 지금 당장 움직여야 하는 일에만 쓰세요 (시간 종료 등).',
+        },
+      },
       required: ['text'],
       additionalProperties: false,
     },
@@ -241,10 +248,27 @@ function call(personId, name, args = {}) {
       return text(job ? { remembered: args.instruction, job: job.name } : 'jobName 과 instruction 이 필요합니다.');
     }
 
+    /**
+     * 화면 밖으로 나가는 유일한 통로.
+     *
+     * 예전에는 활동 기록에 한 줄 적고 bus 로 흘려보내는 게 전부였는데, 그 이벤트를
+     * **듣는 곳이 없었다**. 도구는 'ok' 를 돌려주니 부른 사람은 알렸다고 믿었고,
+     * 사용자에게는 아무것도 뜨지 않았다 — 도구 설명이 "화면을 안 보고 있을 때
+     * 봐야 할 것" 이라고 적어 둔 바로 그 상황에서만 조용한 알림이었다.
+     *
+     * 이제 진짜 Windows 알림을 띄우고, 떴는지 아닌지를 그대로 돌려준다. 알림이
+     * 실패한 것을 성공이라고 말하면 부른 사람이 다시 시도할 기회를 잃는다.
+     */
     case 'notify': {
-      logActivity('notify', `${who} — ${String(args.text).slice(0, 80)}`, personId);
-      bus.emit('notify', { personId, text: String(args.text ?? ''), at: Date.now() });
-      return text('ok');
+      const body = String(args.text ?? '').trim();
+      logActivity('notify', `${who} — ${body.slice(0, 80)}`, personId);
+      bus.emit('notify', { personId, text: body, at: Date.now() });
+      return notifyFor(personId, {
+        title: who,
+        body,
+        urgent: args.urgent === true,
+        kind: 'notify',
+      }).then((r) => text(r.ok ? 'ok' : `알림을 띄우지 못했습니다: ${r.error ?? ''}`));
     }
 
     default:
@@ -298,12 +322,13 @@ export function handle(req, res, pathname, body) {
       reply({ tools: TOOLS });
       break;
 
+    // 대부분의 도구는 그 자리에서 답이 난다. 알림만은 Windows 가 정말 띄웠는지
+    // 확인하고 답해야 해서 기다림이 있다 — 그래서 결과가 약속일 수도 있다고 본다.
     case 'tools/call':
-      try {
-        reply(call(personId, msg.params?.name, msg.params?.arguments ?? {}));
-      } catch (err) {
-        reply({ content: [{ type: 'text', text: `실패: ${err.message}` }], isError: true });
-      }
+      Promise.resolve()
+        .then(() => call(personId, msg.params?.name, msg.params?.arguments ?? {}))
+        .then(reply)
+        .catch((err) => reply({ content: [{ type: 'text', text: `실패: ${err.message}` }], isError: true }));
       break;
 
     default:

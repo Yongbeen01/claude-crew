@@ -172,7 +172,7 @@ export class Runner extends EventEmitter {
    * into a temp path they will never find — observed, not theorised.
    */
   officeRules() {
-    return [
+    const lines = [
       '# 이 사무실의 규칙',
       '',
       '- **결과물은 반드시 작업 폴더(현재 cwd)에 만든다.** 임시 폴더(scratchpad, Temp)에',
@@ -181,7 +181,35 @@ export class Runner extends EventEmitter {
       '- 문서용 패키지(`pptxgenjs`, `xlsx`, `exceljs`)는 **작업 폴더에 이미 설치돼 있다.**',
       '  `npm init` 이나 `npm install` 을 하지 마라. 바로 import 해서 쓰면 된다.',
       '- 사용자는 개발자가 아니다. 경로·명령·패키지 이름을 늘어놓지 말고 무엇이 됐는지만 말한다.',
-    ].join('\n');
+    ];
+
+    /**
+     * 이 규칙이 유형 파일(persona/system.md)이 아니라 여기 있는 이유:
+     *
+     * 유형 폴더는 처음 켤 때 사용자 폴더로 **복사**되고, 그 뒤로는 사용자 것이라
+     * 업데이트가 덮지 않는다. 그래서 유형 파일에 적어 두면 이미 쓰고 있는
+     * 사람에게는 영영 닿지 않는다 — 동작은 새 코드로 바뀌었는데 그 동작을
+     * 설명하는 말만 옛것으로 남는다. 동작을 넣은 자리에 설명도 같이 둔다.
+     */
+    if (this.persona?.notifyOnSpeak) {
+      lines.push(
+        '',
+        '## 당신의 말은 화면 밖으로 나갑니다',
+        '',
+        '사용자가 사무실을 보고 있지 않아도, **당신이 하는 말은 그대로 Windows 알림으로 뜹니다.**',
+        '자리를 비웠을 때 닿으라고 있는 자리이기 때문입니다. 그래서:',
+        '',
+        '- **결론을 첫 문장에.** 알림 창에는 두 줄쯤만 보인다. "30분 남았습니다" 를 먼저 쓰고 부연은 뒤에.',
+        '- 한 번에 한 가지만. 긴 목록은 대화창용이라고 밝히고 알림에는 한 줄 요약만 남긴다.',
+        '- 혼잣말·중간보고를 하지 마라. 말할 것이 없으면 말하지 않는 편이 낫다 —',
+        '  당신의 모든 말이 사용자 화면에 뜬다.',
+        '- 지금 당장 움직여야 하는 일은 `mcp__office__notify` 를 `urgent: true` 로 부른다.',
+        '  사용자가 직접 치울 때까지 화면에 남고 알람 소리가 반복된다. 아껴 써라 —',
+        '  자주 울리는 알림은 사람이 곧 무시한다.',
+      );
+    }
+
+    return lines.join('\n');
   }
 
   /** The persona prompt plus any job briefing, written where argv can't mangle it. */

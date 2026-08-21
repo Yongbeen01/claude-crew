@@ -12,6 +12,7 @@ import * as approvals from './approvals.js';
 import { forgetSummary } from './summarize.js';
 import { handover } from './handover.js';
 import { ensureGroup } from './toolbox.js';
+import { notifyFor, forgetToasts } from './toast.js';
 
 /**
  * Who is sitting in the office right now.
@@ -167,6 +168,20 @@ function announce() {
   bus.emit('crew', snapshot());
 }
 
+/**
+ * 알림 한 줄로 줄인다. 토스트에는 두 줄쯤이 들어가고, 넘치면 잘려서 정작
+ * 중요한 앞부분만 남는 게 아니라 말이 끊긴 채로 남는다. 마크다운 기호도
+ * 떼어 낸다 — 알림 창에서는 그냥 별표로 보인다.
+ */
+function oneLine(text, max = 140) {
+  const s = String(text ?? '')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/[*_`#>]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return s.length > max ? `${s.slice(0, max)}…` : s;
+}
+
 /** Wire a runner's events into the office bus. */
 function wireRunner(person) {
   const r = person.runner;
@@ -194,6 +209,16 @@ function wireRunner(person) {
 
   r.on('assistant', (text) => {
     bus.emit('message', { personId: person.id, role: 'assistant', text, at: Date.now() });
+    /**
+     * 시간을 봐주는 사람(토끼)이 하는 말은 화면 밖까지 나간다.
+     *
+     * 대화창에만 적히면, 자리를 비웠을 때 — 그 말이 가장 필요한 바로 그때 —
+     * 아무 데도 닿지 않는다. 탭이 열려 있는지는 묻지 않는다: 그걸 조건으로
+     * 걸면 알림이 필요 없을 때만 울리는 알림이 된다.
+     */
+    if (person.persona?.notifyOnSpeak) {
+      notifyFor(person.id, { title: person.name, body: oneLine(text) }).catch(() => {});
+    }
   });
 
   // What the person is doing this instant, so the chat can say "생각 중" only
@@ -631,6 +656,7 @@ export function fire(id, { keepFiles = true } = {}) {
   revokeTokensFor(id);
   approvals.forget(id);
   forgetSummary(id);
+  forgetToasts(id);
   people.delete(id);
   if (!keepFiles) {
     fs.rmSync(path.join(SESSIONS_DIR, id), { recursive: true, force: true });

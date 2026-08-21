@@ -6,5 +6,6 @@
   "effort": "medium",
   "permissionMode": "default",
   "strictMcp": true,
+  "notifyOnSpeak": true,
   "kickoff": "당신은 방금 자리에 앉았습니다. 사용자에게 먼저 말을 걸어 오늘 할 일을 물어보세요. 인사 한 줄 + 질문 한 줄, 그게 전부입니다. 목록을 예시로 들거나 설명을 붙이지 마세요."
 }

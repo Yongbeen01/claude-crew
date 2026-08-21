@@ -1,5 +1,5 @@
 import { bus, logActivity } from './bus.js';
-import { notify } from './toast.js';
+import { notifyFor } from './toast.js';
 import { paths, readJson, writeJson } from './store.js';
 
 /**
@@ -115,12 +115,17 @@ function fire(mark) {
   // 화면 밖에서도 닿아야 하는 말이다. 시간이 다 된 것은 긴급으로 띄운다 —
   // 사용자가 직접 치울 때까지 화면에 남고 알람 소리가 반복된다. 남은 시간을
   // 알리는 쪽은 그럴 일이 아니라 보통 알림이다.
-  notify({
+  //
+  // notifyFor 로 보내는 것은 이게 **누가** 낸 알림인지 남겨 두기 위해서다.
+  // 바로 위 poke 를 받은 토끼가 곧 같은 내용을 말할 텐데, 그 말도 이제 알림으로
+  // 나간다 — 표시를 남기지 않으면 사건 하나에 알림이 두 번 뜬다.
+  notifyFor(t.personId, {
     title: mark === 0 ? '토끼 · 시간이 다 됐어요' : '토끼',
     body: mark === 0
       ? `"${t.taskName}" 시간이 다 됐습니다`
       : `"${t.taskName}" ${mark}분 남았습니다`,
     urgent: mark === 0,
+    kind: 'app',
   });
 
   if (mark === 0) {
